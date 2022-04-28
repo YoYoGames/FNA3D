@@ -6855,8 +6855,7 @@ static CreateSwapchainResult VULKAN_INTERNAL_CreateSwapchain(
 static void RemoveSwapchainDataFromRenderer(
 	VulkanRenderer* renderer,
 	void* windowHandle
-)
-{
+) {
 	uint32_t i;
 
 	for (i = 0; i < renderer->swapchainDataCount; i += 1)
@@ -6881,6 +6880,7 @@ static void VULKAN_INTERNAL_DestroySwapchain(
 
 	if (swapchainData == NULL)
 	{
+		RemoveSwapchainDataFromRenderer(renderer, windowHandle);
 		return;
 	}
 

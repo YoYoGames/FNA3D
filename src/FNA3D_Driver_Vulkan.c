@@ -6852,6 +6852,24 @@ static CreateSwapchainResult VULKAN_INTERNAL_CreateSwapchain(
 	return CREATE_SWAPCHAIN_SUCCESS;
 }
 
+static void RemoveSwapchainDataFromRenderer(
+	VulkanRenderer* renderer,
+	void* windowHandle
+)
+{
+	uint32_t i;
+
+	for (i = 0; i < renderer->swapchainDataCount; i += 1)
+	{
+		if (windowHandle == renderer->swapchainDatas[i]->windowHandle)
+		{
+			renderer->swapchainDatas[i] = renderer->swapchainDatas[renderer->swapchainDataCount - 1];
+			renderer->swapchainDataCount -= 1;
+			break;
+		}
+	}
+}
+
 static void VULKAN_INTERNAL_DestroySwapchain(
 	VulkanRenderer *renderer,
 	void *windowHandle
@@ -6916,15 +6934,16 @@ static void VULKAN_INTERNAL_DestroySwapchain(
 		NULL
 	);
 
-	for (i = 0; i < renderer->swapchainDataCount; i += 1)
-	{
-		if (windowHandle == renderer->swapchainDatas[i]->windowHandle)
-		{
-			renderer->swapchainDatas[i] = renderer->swapchainDatas[renderer->swapchainDataCount - 1];
-			renderer->swapchainDataCount -= 1;
-			break;
-		}
-	}
+	//for (i = 0; i < renderer->swapchainDataCount; i += 1)
+	//{
+	//	if (windowHandle == renderer->swapchainDatas[i]->windowHandle)
+	//	{
+	//		renderer->swapchainDatas[i] = renderer->swapchainDatas[renderer->swapchainDataCount - 1];
+	//		renderer->swapchainDataCount -= 1;
+	//		break;
+	//	}
+	//}
+	RemoveSwapchainDataFromRenderer(renderer, windowHandle);
 
 	SDL_SetWindowData(windowHandle, WINDOW_SWAPCHAIN_DATA, NULL);
 	SDL_free(swapchainData);
@@ -6939,6 +6958,14 @@ static void VULKAN_INTERNAL_RecreateSwapchain(
 	renderer->vkDeviceWaitIdle(renderer->logicalDevice);
 
 	VULKAN_INTERNAL_DestroySwapchain(renderer, windowHandle);
+
+	Uint32 windowExists = SDL_GetWindowID(windowHandle);
+
+	if (!windowExists)
+	{
+		return;
+	}
+
 	createSwapchainResult = VULKAN_INTERNAL_CreateSwapchain(renderer, windowHandle);
 
 	if (createSwapchainResult == CREATE_SWAPCHAIN_FAIL)

@@ -294,6 +294,13 @@ typedef struct FNA3D_Renderer FNA3D_Renderer;
 
 struct FNA3D_Device
 {
+	/* Info */
+
+	void (*GetDeviceInfo)(
+		FNA3D_Renderer* driverData,
+		FNA3D_DeviceInfo* info
+	);
+
 	/* Quit */
 
 	void (*DestroyDevice)(FNA3D_Device *device);
@@ -819,6 +826,7 @@ typedef struct FNA3D_Driver
 {
 	const char *Name;
 	uint8_t (*PrepareWindowAttributes)(uint32_t *flags);
+	void (*GetDeviceInfo)(FNA3D_Renderer* device, FNA3D_DeviceInfo* info);
 	FNA3D_Device* (*CreateDevice)(
 		FNA3D_PresentationParameters *presentationParameters,
 		uint8_t debugMode

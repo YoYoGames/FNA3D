@@ -11117,6 +11117,41 @@ static uint8_t VULKAN_PrepareWindowAttributes(uint32_t *flags)
 	return result;
 }
 
+void VULKAN_GetDeviceInfo(FNA3D_Renderer* deviceData, FNA3D_DeviceInfo* info)
+{
+	VulkanRenderer* renderer = (VulkanRenderer*)deviceData;
+	char* deviceName, * adapterName, * versionName, * vendorName;
+	int32_t maxTextureSize = 16384;
+
+	deviceName = SDL_malloc(sizeof(char) * 8);
+	adapterName = SDL_malloc(sizeof(char) * 256);
+	versionName = SDL_malloc(sizeof(char) * 256);
+	vendorName = SDL_malloc(sizeof(char) * 256);
+
+	SDL_snprintf(deviceName, 8, "Vulkan");
+	SDL_snprintf(adapterName, 256, renderer->physicalDeviceProperties.properties.deviceName);
+	SDL_snprintf(versionName, 256, "Unknown");
+	SDL_snprintf(vendorName, 256, "Unknown");
+
+	if (renderer->supports.KHR_driver_properties)
+	{
+		SDL_snprintf(vendorName, 256, "%s", renderer->physicalDeviceDriverProperties.driverInfo);
+		SDL_snprintf(versionName, 256, "Vulkan Conformance: %u.%u.%u",
+			renderer->physicalDeviceDriverProperties.conformanceVersion.major,
+			renderer->physicalDeviceDriverProperties.conformanceVersion.minor,
+			renderer->physicalDeviceDriverProperties.conformanceVersion.patch
+		);
+	}
+
+	info->deviceName = deviceName;
+	info->rendererName = adapterName;
+	info->version = versionName;
+	info->vendorName = vendorName;
+
+	info->maxTextureWidth = maxTextureSize;
+	info->maxTextureHeight = maxTextureSize;
+}
+
 static FNA3D_Device* VULKAN_CreateDevice(
 	FNA3D_PresentationParameters *presentationParameters,
 	uint8_t debugMode
@@ -11991,6 +12026,7 @@ static FNA3D_Device* VULKAN_CreateDevice(
 FNA3D_Driver VulkanDriver = {
 	"Vulkan",
 	VULKAN_PrepareWindowAttributes,
+	VULKAN_GetDeviceInfo,
 	VULKAN_CreateDevice
 };
 

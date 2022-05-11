@@ -459,6 +459,17 @@ typedef struct FNA3D_RenderTargetBinding
 	FNA3D_Renderbuffer *colorBuffer;
 } FNA3D_RenderTargetBinding;
 
+typedef struct FNA3D_DeviceInfo
+{
+	char* rendererName;
+	char* version;
+	char* vendorName;
+	char* deviceName;
+
+	int32_t maxTextureWidth;
+	int32_t maxTextureHeight;
+} FNA3D_DeviceInfo;
+
 /* Version API */
 
 #define FNA3D_ABI_VERSION	 0
@@ -528,10 +539,38 @@ FNA3DAPI FNA3D_Device* FNA3D_CreateDevice(
 	uint8_t debugMode
 );
 
+/* Returns a structure filled with some information about the given Device
+ *
+ * device:		The device to get information from
+ * info:		The struct to fill out with information
+ */
+FNA3DAPI void FNA3D_GetDeviceInfo(
+	FNA3D_Device* device,
+	FNA3D_DeviceInfo* info
+);
+
 /* Destroys a rendering context previously returned by FNA3D_CreateDevice. */
 FNA3DAPI void FNA3D_DestroyDevice(FNA3D_Device *device);
 
 /* Presentation */
+
+/* Sets the current device context on the given window
+ * device:		Device context to set active
+ * window:		Window handle to set active
+*/
+FNA3DAPI void FNA3D_SetCurrentContext(
+	FNA3D_Device* device,
+	void* window
+);
+
+/* Destroys a window context
+ * device:		Device context to set active
+ * window:		Window handle to set active
+*/
+FNA3DAPI void FNA3D_DestroyContext(
+	FNA3D_Device* device,
+	void* window
+);
 
 /* Presents the backbuffer to the window.
  *

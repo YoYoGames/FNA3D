@@ -5820,6 +5820,32 @@ void OPENGL_GetDrawableSize(void* window, int32_t *w, int32_t *h)
 #endif
 }
 
+void OPENGL_GetDeviceInfo(FNA3D_Renderer* deviceData, FNA3D_DeviceInfo* info)
+{
+	OpenGLRenderer* renderer = (OpenGLRenderer*)deviceData;
+	int32_t maxTextureSize;
+	char* deviceName, * adapterName, * versionName, * vendorName;
+	renderer->glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maxTextureSize);
+
+	deviceName = SDL_malloc(sizeof(char) * 8);
+	adapterName = SDL_malloc(sizeof(char) * 128);
+	versionName = SDL_malloc(sizeof(char) * 128);
+	vendorName = SDL_malloc(sizeof(char) * 128);
+
+	SDL_snprintf(deviceName, 8, "OpenGL");
+	SDL_snprintf(adapterName, 128, "%s", renderer->glGetString(GL_RENDERER));
+	SDL_snprintf(versionName, 128, "%s", renderer->glGetString(GL_VERSION));
+	SDL_snprintf(vendorName, 128, "%s", renderer->glGetString(GL_VENDOR));
+
+	info->deviceName = deviceName;
+	info->rendererName = adapterName;
+	info->version = versionName;
+	info->vendorName = vendorName;
+
+	info->maxTextureWidth = maxTextureSize;
+	info->maxTextureHeight = maxTextureSize;
+}
+
 FNA3D_Device* OPENGL_CreateDevice(
 	FNA3D_PresentationParameters *presentationParameters,
 	uint8_t debugMode
@@ -6186,6 +6212,7 @@ FNA3D_Driver OpenGLDriver = {
 	"OpenGL",
 	OPENGL_PrepareWindowAttributes,
 	OPENGL_GetDrawableSize,
+	OPENGL_GetDeviceInfo,
 	OPENGL_CreateDevice
 };
 

@@ -180,6 +180,16 @@ FNA3DAPI void FNA3D_GetDrawableSize(void* window, int32_t *w, int32_t *h)
 	drivers[selectedDriver]->GetDrawableSize(window, w, h);
 }
 
+FNA3DAPI void FNA3D_GetDeviceInfo(FNA3D_Device* device, FNA3D_DeviceInfo* info)
+{
+	TRACE_GETDEVICEINFO
+		if (device == NULL)
+		{
+			return;
+		}
+	drivers[selectedDriver]->GetDeviceInfo(device->driverData, info);
+}
+
 /* Init/Quit */
 
 FNA3D_Device* FNA3D_CreateDevice(

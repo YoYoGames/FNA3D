@@ -33,6 +33,11 @@ void FNA3D_Trace_CreateDevice(
 	uint8_t debugMode
 );
 
+void FNA3D_Trace_GetDeviceInfo(
+	FNA3D_Device* device,
+	FNA3D_DeviceInfo* info
+);
+
 void FNA3D_Trace_DestroyDevice(void);
 
 void FNA3D_Trace_SwapBuffers(
@@ -380,6 +385,7 @@ void FNA3D_Trace_QueryPixelCount(
 void FNA3D_Trace_SetStringMarker(const char *text);
 
 #define TRACE_CREATEDEVICE FNA3D_Trace_CreateDevice(presentationParameters, debugMode);
+#define TRACE_GETDEVICEINFO FNA3D_Trace_GetDeviceInfo(device, window);
 #define TRACE_DESTROYDEVICE FNA3D_Trace_DestroyDevice();
 #define TRACE_SWAPBUFFERS FNA3D_Trace_SwapBuffers(sourceRectangle, destinationRectangle, overrideWindowHandle);
 #define TRACE_CLEAR FNA3D_Trace_Clear(options, color, depth, stencil);
@@ -440,6 +446,7 @@ void FNA3D_Trace_SetStringMarker(const char *text);
 #else
 
 #define TRACE_CREATEDEVICE
+#define TRACE_GETDEVICEINFO
 #define TRACE_DESTROYDEVICE
 #define TRACE_SWAPBUFFERS
 #define TRACE_CLEAR

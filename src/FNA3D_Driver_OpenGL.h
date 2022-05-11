@@ -221,6 +221,7 @@ typedef unsigned char	GLboolean;
 #define GL_TEXTURE_MAX_LEVEL				0x813D
 #define GL_TEXTURE_LOD_BIAS				0x8501
 #define GL_UNPACK_ALIGNMENT				0x0CF5
+#define GL_MAX_TEXTURE_SIZE				0x0D33
 
 /* Multitexture */
 #define GL_TEXTURE0					0x84C0

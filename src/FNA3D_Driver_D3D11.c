@@ -5122,6 +5122,32 @@ static void D3D11_INTERNAL_InitializeFauxBackbufferResources(
 	ERROR_CHECK_RETURN("Backbuffer blend state creation failed",)
 }
 
+void D3D11_GetDeviceInfo(FNA3D_Renderer* deviceData, FNA3D_DeviceInfo* info)
+{
+	D3D11Renderer* renderer = (D3D11Renderer*)deviceData;
+	DXGI_ADAPTER_DESC1 adapterDesc;
+	char* deviceName, * adapterName, * versionName, * vendorName;
+
+	IDXGIAdapter1_GetDesc1(renderer->adapter, &adapterDesc);
+
+	deviceName = SDL_malloc(sizeof(char) * 8);
+	adapterName = SDL_malloc(sizeof(char) * 128);
+	versionName = SDL_malloc(sizeof(char) * 128);
+	vendorName = SDL_malloc(sizeof(char) * 128);
+
+	SDL_snprintf(deviceName, 8, "D3D11");
+	SDL_snprintf(adapterName, 128, "%S", adapterDesc.Description);
+	SDL_snprintf(versionName, 128, "Revision: %d", adapterDesc.Revision);
+	SDL_snprintf(vendorName, 128, "Vendor Id: %d", adapterDesc.VendorId);
+
+	info->deviceName = deviceName;
+	info->rendererName = adapterName;
+	info->version = versionName;
+	info->vendorName = vendorName;
+	info->maxTextureWidth = D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION;
+	info->maxTextureHeight = D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION;
+}
+
 static FNA3D_Device* D3D11_CreateDevice(
 	FNA3D_PresentationParameters *presentationParameters,
 	uint8_t debugMode
@@ -5760,6 +5786,7 @@ FNA3D_Driver D3D11Driver = {
 	"D3D11",
 	D3D11_PrepareWindowAttributes,
 	D3D11_GetDrawableSize,
+	D3D11_GetDeviceInfo,
 	D3D11_CreateDevice
 };
 

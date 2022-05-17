@@ -6511,7 +6511,7 @@ static CreateSwapchainResult VULKAN_INTERNAL_CreateSwapchain(
 
 	swapchainData->swapchainFormat = renderer->backBufferIsSRGB
 		? VK_FORMAT_R8G8B8A8_SRGB
-		: VK_FORMAT_R8G8B8A8_UNORM;
+		: VK_FORMAT_B8G8R8A8_UNORM;
 	swapchainData->swapchainSwizzle.r = VK_COMPONENT_SWIZZLE_IDENTITY;
 	swapchainData->swapchainSwizzle.g = VK_COMPONENT_SWIZZLE_IDENTITY;
 	swapchainData->swapchainSwizzle.b = VK_COMPONENT_SWIZZLE_IDENTITY;

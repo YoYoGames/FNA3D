@@ -1274,6 +1274,7 @@ typedef struct VulkanRenderer
 	int8_t freeQueryIndexStack[MAX_QUERIES];
 	int8_t freeQueryIndexStackHead;
 
+	VkFormat backBufferFormat;
 	int8_t backBufferIsSRGB;
 	FNA3D_PresentInterval presentInterval;
 
@@ -6509,9 +6510,7 @@ static CreateSwapchainResult VULKAN_INTERNAL_CreateSwapchain(
 		return CREATE_SWAPCHAIN_SURFACE_ZERO;
 	}
 
-	swapchainData->swapchainFormat = renderer->backBufferIsSRGB
-		? VK_FORMAT_R8G8B8A8_SRGB
-		: VK_FORMAT_B8G8R8A8_UNORM;
+	swapchainData->swapchainFormat = renderer->backBufferFormat;
 	swapchainData->swapchainSwizzle.r = VK_COMPONENT_SWIZZLE_IDENTITY;
 	swapchainData->swapchainSwizzle.g = VK_COMPONENT_SWIZZLE_IDENTITY;
 	swapchainData->swapchainSwizzle.b = VK_COMPONENT_SWIZZLE_IDENTITY;
@@ -8106,6 +8105,64 @@ static void VULKAN_INTERNAL_BindPipeline(VulkanRenderer *renderer)
 
 /* Vulkan: The Faux-Backbuffer */
 
+static VkFormat VULKAN_INTERNAL_GetBackBufferFormatFrom(
+	FNA3D_PresentationParameters *presentationParameters
+) {
+	switch (presentationParameters->backBufferFormat)
+	{
+		case FNA3D_SURFACEFORMAT_COLOR:
+			return VK_FORMAT_R8G8B8A8_UNORM;
+		case FNA3D_SURFACEFORMAT_BGR565:
+			return VK_FORMAT_R5G6B5_UNORM_PACK16;
+		case FNA3D_SURFACEFORMAT_BGRA5551:
+			return VK_FORMAT_A1R5G5B5_UNORM_PACK16;
+		case FNA3D_SURFACEFORMAT_BGRA4444:
+			return VK_FORMAT_B4G4R4A4_UNORM_PACK16;
+		case FNA3D_SURFACEFORMAT_DXT1:
+			return VK_FORMAT_BC1_RGBA_UNORM_BLOCK;
+		case FNA3D_SURFACEFORMAT_DXT3:
+			return VK_FORMAT_BC2_UNORM_BLOCK;
+		case FNA3D_SURFACEFORMAT_DXT5:
+			return VK_FORMAT_BC3_UNORM_BLOCK;
+		case FNA3D_SURFACEFORMAT_NORMALIZEDBYTE2:
+			return VK_FORMAT_R8G8_SNORM;
+		case FNA3D_SURFACEFORMAT_NORMALIZEDBYTE4:
+			return VK_FORMAT_R8G8B8A8_SNORM;
+		case FNA3D_SURFACEFORMAT_RGBA1010102:
+			return VK_FORMAT_A2R10G10B10_UNORM_PACK32;
+		case FNA3D_SURFACEFORMAT_RG32:
+			return VK_FORMAT_R16G16_UNORM;
+		case FNA3D_SURFACEFORMAT_RGBA64:
+			return VK_FORMAT_R16G16B16A16_UNORM;
+		case FNA3D_SURFACEFORMAT_ALPHA8:
+			return VK_FORMAT_R8_UNORM;
+		case FNA3D_SURFACEFORMAT_SINGLE:
+			return VK_FORMAT_R32_SFLOAT;
+		case FNA3D_SURFACEFORMAT_VECTOR2:
+			return VK_FORMAT_R32G32_SFLOAT;
+		case FNA3D_SURFACEFORMAT_VECTOR4:
+			return VK_FORMAT_R32G32B32A32_SFLOAT;
+		case FNA3D_SURFACEFORMAT_HALFSINGLE:
+			return VK_FORMAT_R16_SFLOAT;
+		case FNA3D_SURFACEFORMAT_HALFVECTOR2:
+			return VK_FORMAT_R16G16_SFLOAT;
+		case FNA3D_SURFACEFORMAT_HALFVECTOR4:
+			return VK_FORMAT_R16G16B16A16_SFLOAT;
+		case FNA3D_SURFACEFORMAT_HDRBLENDABLE:
+			return VK_FORMAT_R16G16B16A16_SFLOAT;
+		case FNA3D_SURFACEFORMAT_COLORBGRA_EXT:
+			return VK_FORMAT_B8G8R8A8_UNORM;
+		case FNA3D_SURFACEFORMAT_COLORSRGB_EXT:
+			return VK_FORMAT_R8G8B8A8_SRGB;
+		case FNA3D_SURFACEFORMAT_DXT5SRGB_EXT:
+			return VK_FORMAT_BC3_SRGB_BLOCK;
+		case FNA3D_SURFACEFORMAT_BC7_EXT:
+			return VK_FORMAT_BC7_UNORM_BLOCK;
+		case FNA3D_SURFACEFORMAT_BC7SRGB_EXT:
+			return VK_FORMAT_BC7_SRGB_BLOCK;
+	}
+}
+
 static uint8_t VULKAN_INTERNAL_CreateFauxBackbuffer(
 	VulkanRenderer *renderer,
 	FNA3D_PresentationParameters *presentationParameters
@@ -8115,6 +8172,7 @@ static uint8_t VULKAN_INTERNAL_CreateFauxBackbuffer(
 	VkFormat format;
 	VkComponentMapping swizzle;
 
+	renderer->backBufferFormat = VULKAN_INTERNAL_GetBackBufferFormatFrom(presentationParameters);
 	renderer->backBufferIsSRGB = presentationParameters->backBufferFormat == FNA3D_SURFACEFORMAT_COLORSRGB_EXT;
 	renderer->presentInterval = presentationParameters->presentationInterval;
 

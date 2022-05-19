@@ -6591,7 +6591,12 @@ static CreateSwapchainResult VULKAN_INTERNAL_CreateSwapchain(
 		drawableHeight < swapchainSupportDetails.capabilities.minImageExtent.height ||
 		drawableHeight > swapchainSupportDetails.capabilities.maxImageExtent.height	)
 	{
-		FNA3D_LogWarn("Drawable size not possible for this VkSurface!");
+		FNA3D_LogWarn("Drawable size not possible for this VkSurface! Drawable size: (%d, %d). Extent: (%d, %d).",
+			drawableWidth,
+			drawableHeight,
+			swapchainSupportDetails.capabilities.currentExtent.width,
+			swapchainSupportDetails.capabilities.currentExtent.height
+			);
 
 		if (swapchainSupportDetails.capabilities.currentExtent.width != UINT32_MAX)
 		{
@@ -6949,6 +6954,7 @@ static void VULKAN_INTERNAL_RecreateSwapchain(
 	renderer->vkDeviceWaitIdle(renderer->logicalDevice);
 
 	VULKAN_INTERNAL_DestroySwapchain(renderer, windowHandle);
+	FNA3D_Debug_ForceEvents();
 
 	windowExists = SDL_GetWindowID(windowHandle);
 

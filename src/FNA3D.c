@@ -80,9 +80,14 @@ static void FNA3D_Default_LogError(const char *msg)
 	);
 }
 
+static void FNA3D_DebugForceCallback()
+{	
+}
+
 static FNA3D_LogFunc FNA3D_LogInfoFunc = FNA3D_Default_LogInfo;
 static FNA3D_LogFunc FNA3D_LogWarnFunc = FNA3D_Default_LogWarn;
 static FNA3D_LogFunc FNA3D_LogErrorFunc = FNA3D_Default_LogError;
+static FNA3D_Callback FNA3D_DebugForceCallbackFunc = FNA3D_DebugForceCallback;
 
 #define MAX_MESSAGE_SIZE 1024
 
@@ -126,6 +131,21 @@ void FNA3D_HookLogFunctions(
 	FNA3D_LogInfoFunc = info;
 	FNA3D_LogWarnFunc = warn;
 	FNA3D_LogErrorFunc = error;
+}
+
+void FNA3D_Debug_ForceEvents(){
+
+	FNA3D_DebugForceCallbackFunc();
+	return; 
+
+	SDL_Event evt;
+	while (SDL_PollEvent(&evt) > 0)
+	{
+	}
+}
+
+void FNA3D_Debug_HookForceEventsHandler(FNA3D_Callback callback){
+	FNA3D_DebugForceCallbackFunc = callback;
 }
 
 /* Version API */

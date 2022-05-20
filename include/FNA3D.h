@@ -494,7 +494,7 @@ FNA3DAPI void FNA3D_HookLogFunctions(
 );
 
 typedef void (FNA3DCALL * FNA3D_Callback)();
-void FNA3D_Debug_HookForceEventsHandler(FNA3D_Callback callback);
+FNA3DAPI void FNA3D_Debug_HookForceEventsHandler(FNA3D_Callback callback);
 
 void FNA3D_Debug_ForceEvents();
 

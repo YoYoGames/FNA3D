@@ -6954,7 +6954,7 @@ static void VULKAN_INTERNAL_RecreateSwapchain(
 	renderer->vkDeviceWaitIdle(renderer->logicalDevice);
 
 	VULKAN_INTERNAL_DestroySwapchain(renderer, windowHandle);
-	FNA3D_Debug_ForceEvents();
+	FNA3D_OnSwapchainDestroyed();
 
 	windowExists = SDL_GetWindowID(windowHandle);
 

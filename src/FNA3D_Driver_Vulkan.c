@@ -11227,7 +11227,7 @@ void VULKAN_GetDeviceInfo(FNA3D_Renderer* deviceData, FNA3D_DeviceInfo* info)
 	vendorName = SDL_malloc(sizeof(char) * 256);
 
 	SDL_snprintf(deviceName, 8, "Vulkan");
-	SDL_snprintf(adapterName, 256, renderer->physicalDeviceProperties.properties.deviceName);
+	SDL_snprintf(adapterName, 256, "%s", renderer->physicalDeviceProperties.properties.deviceName);
 	SDL_snprintf(versionName, 256, "Unknown");
 	SDL_snprintf(vendorName, 256, "Unknown");
 

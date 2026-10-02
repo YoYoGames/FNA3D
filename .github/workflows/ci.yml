@@ -7,13 +7,12 @@ jobs:
     name: Linux
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
       with:
         submodules: true
 
     - name: Install dependencies
       run: |
-        sudo apt-add-repository ppa:hrzhu/sdl2-backport
         sudo apt-get update
         sudo apt-get install ninja-build libsdl2-dev
 
@@ -36,7 +35,7 @@ jobs:
       CXXFLAGS: -I/usr/local/include/SDL2
       LDFLAGS: -L/usr/local/lib
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
       with:
         submodules: true
 
@@ -61,12 +60,12 @@ jobs:
     env:
       SDL_VERSION: 2.26.0
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
       with:
         submodules: true
 
     - name: Cache SDL
-      uses: actions/cache@v2
+      uses: actions/cache@v4
       env:
         cache-name: cache-sdl
       with:
@@ -77,7 +76,7 @@ jobs:
       run: |
         if (-Not (Test-Path C:\SDL))
         {
-            Invoke-WebRequest "https://github.com/libsdl-org/SDL/releases/download/release-$env:SDL_VERSION/SDL2-devel-$env:SDL_VERSION-VC.zip" -o C:\SDL.zip
+            Invoke-WebRequest "https://github.com/libsdl-org/SDL/releases/download/release-$env:SDL_VERSION/SDL2-devel-$env:SDL_VERSION-VC.zip" -OutFile C:\SDL.zip
             Expand-Archive C:\SDL.zip -DestinationPath C:\
         }
 
@@ -110,7 +109,7 @@ jobs:
       run:
         shell: msys2 {0}
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
       with:
         submodules: true
 
@@ -138,17 +137,19 @@ jobs:
       run: cmake --build release
 
   freebsd:
-    runs-on: macos-12
+    runs-on: ubuntu-latest
     name: FreeBSD
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
       with:
         submodules: true
     - name: Build
-      uses: vmactions/freebsd-vm@v0
+      uses: cross-platform-actions/action@v1.6.0
       with:
-        usesh: true
-        prepare: pkg install -y cmake ninja sdl2
+        operating_system: freebsd
+        version: '14.3'
         run: |
+          sudo pkg update
+          sudo pkg install -y cmake ninja sdl2
           cmake -B build -G Ninja .
           cmake --build build --verbose -- -j`sysctl -n hw.ncpu`

@@ -83,7 +83,7 @@ jobs:
     - name: CMake configure (Debug)
       run: |
         $env:LDFLAGS =  "/LIBPATH:C:\SDL2-$env:SDL_VERSION\lib\x86 "
-        cmake -B debug -G "Visual Studio 17 2022" . -DCMAKE_BUILD_TYPE=Debug `
+        cmake -B debug . -DCMAKE_BUILD_TYPE=Debug `
           -A Win32 `
           -DSDL2_INCLUDE_DIRS="C:\SDL2-$env:SDL_VERSION\include" `
           -DSDL2_LIBRARIES="SDL2;SDL2main"
@@ -94,7 +94,7 @@ jobs:
     - name: CMake configure (Release)
       run: |
         $env:LDFLAGS =  "/LIBPATH:C:\SDL2-$env:SDL_VERSION\lib\x86 "
-        cmake -B release -G "Visual Studio 17 2022" . -DCMAKE_BUILD_TYPE=Release `
+        cmake -B release . -DCMAKE_BUILD_TYPE=Release `
           -A Win32 `
           -DSDL2_INCLUDE_DIRS="C:\SDL2-$env:SDL_VERSION\include" `
           -DSDL2_LIBRARIES="SDL2;SDL2main"
@@ -147,9 +147,10 @@ jobs:
       uses: cross-platform-actions/action@v1.6.0
       with:
         operating_system: freebsd
-        version: '14.3'
+        version: '14.5'
+        # the package catalogue can be built for a newer 14.x than the VM
         run: |
-          sudo pkg update
-          sudo pkg install -y cmake ninja sdl2
+          sudo env IGNORE_OSVERSION=yes pkg update
+          sudo env IGNORE_OSVERSION=yes pkg install -y cmake ninja sdl2
           cmake -B build -G Ninja .
           cmake --build build --verbose -- -j`sysctl -n hw.ncpu`

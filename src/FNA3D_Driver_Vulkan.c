@@ -8425,6 +8425,18 @@ static void VULKAN_ResetBackbuffer(
 
 	VULKAN_INTERNAL_FlushCommands(renderer, 1);
 
+	/* CreateFauxBackbuffer points the next render pass at the new backbuffer
+	 * only if renderTargetBound is 0, but that flag describes the last render
+	 * pass that began, not the next one: after drawing to a render target
+	 * and switching back to the backbuffer with nothing drawn since, it is
+	 * still 1, and the next pass would keep the backbuffer destroyed below.
+	 * Decide from what the next pass will actually use.
+	 */
+	renderer->renderTargetBound = (
+		renderer->nextRenderPassColorAttachments[0] !=
+		renderer->fauxBackbufferColor.handle
+	);
+
 	VULKAN_INTERNAL_DestroyFauxBackbuffer(renderer);
 	VULKAN_INTERNAL_CreateFauxBackbuffer(
 		renderer,

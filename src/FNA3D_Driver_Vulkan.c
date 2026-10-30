@@ -7647,6 +7647,23 @@ static void VULKAN_DestroyDevice(FNA3D_Device *device)
 
 /* Presentation */
 
+static void VULKAN_DestroyContext(
+	FNA3D_Renderer *driverData,
+	void* windowHandle
+) {
+	VulkanRenderer *renderer = (VulkanRenderer*) driverData;
+
+	/* Release the window's surface and swapchain while SDL can still find
+	 * them: once the window is destroyed DestroySwapchain can't look up its
+	 * data, the entry stays in swapchainDatas, and the next ResetBackbuffer
+	 * tries to recreate a swapchain for the dead window
+	 * ("SDL_Vulkan_CreateSurface failed: Invalid window").
+	 */
+	VULKAN_INTERNAL_FlushCommands(renderer, 1);
+	renderer->vkDeviceWaitIdle(renderer->logicalDevice);
+	VULKAN_INTERNAL_DestroySwapchain(renderer, windowHandle);
+}
+
 static void VULKAN_SwapBuffers(
 	FNA3D_Renderer *driverData,
 	FNA3D_Rect *sourceRectangle,

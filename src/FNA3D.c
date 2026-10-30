@@ -239,6 +239,17 @@ void FNA3D_SwapBuffers(
 	);
 }
 
+void FNA3D_DestroyContext(
+	FNA3D_Device *device,
+	void* window
+) {
+	if (device == NULL || window == NULL)
+	{
+		return;
+	}
+	device->DestroyContext(device->driverData, window);
+}
+
 /* Drawing */
 
 void FNA3D_Clear(

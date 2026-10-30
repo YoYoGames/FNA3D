@@ -314,6 +314,11 @@ struct FNA3D_Device
 		void* overrideWindowHandle
 	);
 
+	void (*DestroyContext)(
+		FNA3D_Renderer *driverData,
+		void* window
+	);
+
 	/* Drawing */
 
 	void (*Clear)(
@@ -748,6 +753,7 @@ struct FNA3D_Device
 #define ASSIGN_DRIVER(name) \
 	ASSIGN_DRIVER_FUNC(DestroyDevice, name) \
 	ASSIGN_DRIVER_FUNC(SwapBuffers, name) \
+	ASSIGN_DRIVER_FUNC(DestroyContext, name) \
 	ASSIGN_DRIVER_FUNC(Clear, name) \
 	ASSIGN_DRIVER_FUNC(DrawIndexedPrimitives, name) \
 	ASSIGN_DRIVER_FUNC(DrawInstancedPrimitives, name) \

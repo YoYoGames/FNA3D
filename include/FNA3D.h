@@ -544,6 +544,16 @@ FNA3DAPI void FNA3D_DestroyDevice(FNA3D_Device *device);
 
 /* Presentation */
 
+/* Releases what the device holds for a window (its swapchain), before the
+ * window is destroyed: the window can't be presented to afterwards.
+ * device:		The device that has presented to the window
+ * window:		Window handle that is about to be destroyed
+*/
+FNA3DAPI void FNA3D_DestroyContext(
+	FNA3D_Device* device,
+	void* window
+);
+
 /* Presents the backbuffer to the window.
  *
  * sourceRectangle:		The region of the buffer to present (or NULL).

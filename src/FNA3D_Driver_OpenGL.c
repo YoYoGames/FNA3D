@@ -1288,6 +1288,13 @@ static inline void DisposeResources(OpenGLRenderer *renderer)
 	#undef DISPOSE
 }
 
+static void OPENGL_DestroyContext(
+	FNA3D_Renderer *driverData,
+	void* window
+) {
+	/* Nothing to release: all windows share the one GL context */
+}
+
 static void OPENGL_SwapBuffers(
 	FNA3D_Renderer *driverData,
 	FNA3D_Rect *sourceRectangle,

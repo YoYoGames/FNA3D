@@ -1483,6 +1483,16 @@ static void D3D11_INTERNAL_BlitFauxBackbuffer(
 	SDL_UnlockMutex(renderer->ctxLock);
 }
 
+static void D3D11_DestroyContext(
+	FNA3D_Renderer *driverData,
+	void* window
+) {
+	/* TODO: release the window's swapchain like VULKAN_DestroyContext; D3D11
+	 * doesn't recreate other windows' swapchains on ResetBackbuffer, so a
+	 * destroyed window's entry isn't touched again until DestroyDevice
+	 */
+}
+
 static void D3D11_SwapBuffers(
 	FNA3D_Renderer *driverData,
 	FNA3D_Rect *sourceRectangle,

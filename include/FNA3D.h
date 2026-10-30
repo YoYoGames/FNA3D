@@ -572,9 +572,10 @@ FNA3DAPI void FNA3D_SetCurrentContext(
 	void* window
 );
 
-/* Destroys a window context
- * device:		Device context to set active
- * window:		Window handle to set active
+/* Releases what the device holds for a window (its swapchain), before the
+ * window is destroyed: the window can't be presented to afterwards.
+ * device:		The device that has presented to the window
+ * window:		Window handle that is about to be destroyed
 */
 FNA3DAPI void FNA3D_DestroyContext(
 	FNA3D_Device* device,

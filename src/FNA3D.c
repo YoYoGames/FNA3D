@@ -142,6 +142,16 @@ uint32_t FNA3D_LinkedVersion(void)
 	return FNA3D_COMPILED_VERSION;
 }
 
+#ifndef FNA3D_BUILD_COMMIT
+#define FNA3D_BUILD_COMMIT "unknown"
+#endif
+static const char fna3d_build_commit[] = "FNA3D-build-commit: " FNA3D_BUILD_COMMIT;
+
+const char* FNA3D_BuildCommit(void)
+{
+	return fna3d_build_commit + sizeof("FNA3D-build-commit: ") - 1;
+}
+
 /* Driver Functions */
 
 static int32_t selectedDriver = -1;

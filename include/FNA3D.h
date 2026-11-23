@@ -483,6 +483,13 @@ typedef struct FNA3D_RenderTargetBinding
 
 FNA3DAPI uint32_t FNA3D_LinkedVersion(void);
 
+/* The commit of the YoYoGames/FNA3D fork this library was built from, set by
+ * the build (-DFNA3D_BUILD_COMMIT=<sha>), or "unknown". The same text is in
+ * the binary as "FNA3D-build-commit: <sha>", so a build can be checked
+ * without loading it.
+ */
+FNA3DAPI const char* FNA3D_BuildCommit(void);
+
 /* Functions */
 
 /* Logging */

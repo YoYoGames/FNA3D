@@ -7,6 +7,10 @@ project(FNA3D C)
 option(BUILD_SHARED_LIBS "Build shared library" ON)
 option(TRACING_SUPPORT "Build with tracing enabled" OFF)
 option(BUILD_SDL3 "Build against SDL 3.0" ON)
+set(FNA3D_BUILD_COMMIT "" CACHE STRING "YoYoGames/FNA3D commit this build is from, embedded in the binary")
+if(FNA3D_BUILD_COMMIT)
+	add_definitions(-DFNA3D_BUILD_COMMIT="${FNA3D_BUILD_COMMIT}")
+endif()
 option(MOJOSHADER_STATIC_SPIRVCROSS "Build against statically linked spirvcross" OFF)
 
 # Version

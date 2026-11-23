@@ -28,6 +28,9 @@
 #define FNA3D_DRIVER_H
 
 #include "mojoshader.h"
+#if FNA3D_DRIVER_VULKAN
+#include "mojoshader_vk/mojoshader_vulkan.h" /* MojoShader dropped its Vulkan interface; we keep it */
+#endif /* FNA3D_DRIVER_VULKAN */
 #include "FNA3D.h"
 #include "FNA3D_SysRenderer.h"
 

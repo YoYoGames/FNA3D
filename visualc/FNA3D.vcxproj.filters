@@ -36,7 +36,7 @@
       <Filter>mojoshader</Filter>
     </ClCompile>
     <ClCompile Include="..\src\FNA3D_Driver_D3D11.c" />
-    <ClCompile Include="..\MojoShader\mojoshader_vulkan.c">
+    <ClCompile Include="..\src\mojoshader_vk\mojoshader_vulkan.c">
       <Filter>mojoshader</Filter>
     </ClCompile>
     <ClCompile Include="..\MojoShader\mojoshader_sdlgpu.c">

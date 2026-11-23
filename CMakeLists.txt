@@ -134,7 +134,7 @@ add_library(mojoshader STATIC
 	MojoShader/mojoshader_common.c
 	MojoShader/mojoshader_d3d11.c
 	MojoShader/mojoshader_opengl.c
-	MojoShader/mojoshader_vulkan.c
+	src/mojoshader_vk/mojoshader_vulkan.c
 	MojoShader/mojoshader_sdlgpu.c
 	MojoShader/profiles/mojoshader_profile_common.c
 	MojoShader/profiles/mojoshader_profile_glsl.c
@@ -178,6 +178,7 @@ if(BUILD_DXVK_NATIVE)
 endif()
 target_include_directories(mojoshader PUBLIC
 	$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/MojoShader>
+	$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/mojoshader_vk>
 	$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/Vulkan-Headers/include>
 )
 

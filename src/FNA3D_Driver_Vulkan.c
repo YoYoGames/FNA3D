@@ -3477,7 +3477,10 @@ static inline VkDeviceSize VULKAN_INTERNAL_NextHighestAlignment(
 	return align * ((n + align - 1) / align);
 }
 
-static void VULKAN_INTERNAL_CopyToTransferBuffer(
+/* Returns 0 if no transfer buffer could be had (out of memory, or the device is
+ * lost): the caller must unlock and bail out
+ */
+static uint8_t VULKAN_INTERNAL_CopyToTransferBuffer(
 	VulkanRenderer *renderer,
 	void* data,
 	uint32_t uploadLength,
@@ -3499,6 +3502,10 @@ static void VULKAN_INTERNAL_CopyToTransferBuffer(
 		uploadLength,
 		fmtAlignment
 	);
+	if (transferBuffer == NULL || transferBuffer->buffer == NULL)
+	{
+		return 0;
+	}
 	parentBuffer = (VulkanBuffer*) transferBuffer->buffer;
 
 	transferBufferPointer = FNA3D_Memory_GetHostPointer(
@@ -3516,9 +3523,11 @@ static void VULKAN_INTERNAL_CopyToTransferBuffer(
 	*pOffset = transferBuffer->offset;
 
 	transferBuffer->offset += copyLength;
+	return 1;
 }
 
-static void VULKAN_INTERNAL_PrepareCopyFromTransferBuffer(
+/* Returns 0 if no transfer buffer could be had: see CopyToTransferBuffer */
+static uint8_t VULKAN_INTERNAL_PrepareCopyFromTransferBuffer(
 	VulkanRenderer *renderer,
 	VkDeviceSize dataLength,
 	VkDeviceSize alignment,
@@ -3535,13 +3544,20 @@ static void VULKAN_INTERNAL_PrepareCopyFromTransferBuffer(
 		dataLength,
 		fmtAlignment
 	);
-	VulkanBuffer *parentBuffer = (VulkanBuffer*) transferBuffer->buffer;
+	VulkanBuffer *parentBuffer;
+
+	if (transferBuffer == NULL || transferBuffer->buffer == NULL)
+	{
+		return 0;
+	}
+	parentBuffer = (VulkanBuffer*) transferBuffer->buffer;
 
 	*pTransferBuffer = transferBuffer;
 	*pTransferBufferPointer = FNA3D_Memory_GetHostPointer(
 		parentBuffer->usedRegion,
 		transferBuffer->offset
 	);
+	return 1;
 }
 
 /* Vulkan: Descriptor Set Logic */
@@ -5410,15 +5426,20 @@ static void VULKAN_INTERNAL_SetBufferData(
 
 		FNA3D_CommandBuffer_LockForTransfer(renderer->commandBuffers);
 
-		VULKAN_INTERNAL_CopyToTransferBuffer(
-			renderer,
-			data,
-			dataLength,
-			dataLength,
-			&transferBuffer,
-			&transferOffset,
-			renderer->physicalDeviceProperties.properties.limits.optimalBufferCopyOffsetAlignment
-		);
+		if (!VULKAN_INTERNAL_CopyToTransferBuffer(
+				renderer,
+				data,
+				dataLength,
+				dataLength,
+				&transferBuffer,
+				&transferOffset,
+				renderer->physicalDeviceProperties.properties.limits.optimalBufferCopyOffsetAlignment
+			))
+		{
+			FNA3D_CommandBuffer_UnlockFromTransfer(renderer->commandBuffers);
+			SDL_UnlockMutex(renderer->passLock);
+			return;
+		}
 
 		VULKAN_INTERNAL_BufferMemoryBarrier(
 			renderer,
@@ -5709,16 +5730,22 @@ static void VULKAN_INTERNAL_GetTextureData(
 	SDL_LockMutex(renderer->passLock);
 	FNA3D_CommandBuffer_LockForTransfer(renderer->commandBuffers);
 
-	VULKAN_INTERNAL_PrepareCopyFromTransferBuffer(
-		renderer,
-		dataLength,
-		/* The Vulkan spec states: bufferOffset must be a multiple of 4
-		 * https://vulkan.lunarg.com/doc/view/1.2.141.0/windows/1.2-extensions/vkspec.html#VUID-VkBufferImageCopy-bufferOffset-00194
-		 */
-		(VkDeviceSize)SDL_max(Texture_GetFormatSize(vulkanTexture->colorFormat), 4),
-		&transferBuffer,
-		(void**) &transferBufferPointer
-	);
+	if (!VULKAN_INTERNAL_PrepareCopyFromTransferBuffer(
+			renderer,
+			dataLength,
+			/* The Vulkan spec states: bufferOffset must be a multiple of 4
+			 * https://vulkan.lunarg.com/doc/view/1.2.141.0/windows/1.2-extensions/vkspec.html#VUID-VkBufferImageCopy-bufferOffset-00194
+			 */
+			(VkDeviceSize)SDL_max(Texture_GetFormatSize(vulkanTexture->colorFormat), 4),
+			&transferBuffer,
+			(void**) &transferBufferPointer
+		))
+	{
+		SDL_memset(data, '\0', dataLength);
+		FNA3D_CommandBuffer_UnlockFromTransfer(renderer->commandBuffers);
+		SDL_UnlockMutex(renderer->passLock);
+		return;
+	}
 
 	/* Cache this so we can restore it later */
 	prevResourceAccess = vulkanTexture->resourceAccessType;
@@ -7821,11 +7848,17 @@ static FNA3D_DeviceStatus VULKAN_GetDeviceStatus(
 		/* Ask the driver: a lost device says so here even if nothing has
 		 * failed yet (an idle host submits nothing)
 		 */
-		VULKAN_INTERNAL_CheckLost(
-			renderer,
-			"vkGetFenceStatus",
-			renderer->vkGetFenceStatus(renderer->logicalDevice, renderer->statusFence)
+		/* It's never submitted, so a working device can only say NOT_READY:
+		 * once the device is lost it may say SUCCESS instead of DEVICE_LOST
+		 */
+		VkResult res = renderer->vkGetFenceStatus(
+			renderer->logicalDevice,
+			renderer->statusFence
 		);
+		if (res != VK_NOT_READY)
+		{
+			VULKAN_INTERNAL_MarkLost(renderer, "vkGetFenceStatus", VK_ERROR_DEVICE_LOST);
+		}
 	}
 	*reason = renderer->deviceLost ? (uint32_t) renderer->lostReason : 0;
 	*softwareAdapter = (renderer->physicalDeviceProperties.properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU);
@@ -9077,15 +9110,20 @@ static void VULKAN_INTERNAL_SetTextureData(
 	SDL_LockMutex(renderer->passLock);
 	FNA3D_CommandBuffer_LockForTransfer(renderer->commandBuffers);
 
-	VULKAN_INTERNAL_CopyToTransferBuffer(
-		renderer,
-		data,
-		uploadLength,
-		copyLength,
-		&transferBuffer,
-		&offset,
-		(VkDeviceSize)Texture_GetFormatSize(texture->colorFormat)
-	);
+	if (!VULKAN_INTERNAL_CopyToTransferBuffer(
+			renderer,
+			data,
+			uploadLength,
+			copyLength,
+			&transferBuffer,
+			&offset,
+			(VkDeviceSize)Texture_GetFormatSize(texture->colorFormat)
+		))
+	{
+		FNA3D_CommandBuffer_UnlockFromTransfer(renderer->commandBuffers);
+		SDL_UnlockMutex(renderer->passLock);
+		return;
+	}
 
 	VULKAN_INTERNAL_BufferMemoryBarrier(
 		renderer,
@@ -9286,15 +9324,20 @@ static void VULKAN_SetTextureDataYUV(
 	SDL_LockMutex(renderer->passLock);
 	FNA3D_CommandBuffer_LockForTransfer(renderer->commandBuffers);
 
-	VULKAN_INTERNAL_CopyToTransferBuffer(
-		renderer,
-		data,
-		uploadLength,
-		copyLength,
-		&transferBuffer,
-		&offset,
-		(VkDeviceSize)Texture_GetFormatSize(FNA3D_SURFACEFORMAT_ALPHA8)
-	);
+	if (!VULKAN_INTERNAL_CopyToTransferBuffer(
+			renderer,
+			data,
+			uploadLength,
+			copyLength,
+			&transferBuffer,
+			&offset,
+			(VkDeviceSize)Texture_GetFormatSize(FNA3D_SURFACEFORMAT_ALPHA8)
+		))
+	{
+		FNA3D_CommandBuffer_UnlockFromTransfer(renderer->commandBuffers);
+		SDL_UnlockMutex(renderer->passLock);
+		return;
+	}
 
 	VULKAN_INTERNAL_BufferMemoryBarrier(
 		renderer,

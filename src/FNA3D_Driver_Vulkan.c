@@ -1122,6 +1122,7 @@ typedef struct VulkanRenderer
 	 */
 	uint8_t deviceLost;
 	VkResult lostReason;
+	VkFence statusFence; /* never submitted: polled for VK_ERROR_DEVICE_LOST */
 	FNA3D_MemoryAllocator *allocator;
 
 	VkInstance instance;
@@ -5378,6 +5379,14 @@ static void VULKAN_INTERNAL_SetBufferData(
 	VkBufferCopy bufferCopy;
 	VulkanResourceAccessType accessType;
 
+	/* Once the device is lost, uploads and readbacks do nothing: a transfer
+	 * buffer can't be made any more, and the host recreates the device anyway
+	 */
+	if (renderer->deviceLost)
+	{
+		return;
+	}
+
 	vulkanBuffer = (VulkanBuffer*) FNA3D_Memory_GetActiveBuffer(container);
 	accessType = vulkanBuffer->resourceAccessType;
 
@@ -5685,6 +5694,15 @@ static void VULKAN_INTERNAL_GetTextureData(
 	VkBufferImageCopy imageCopy;
 	uint8_t *dataPtr = (uint8_t*) data;
 	uint8_t *transferBufferPointer;
+
+	/* Once the device is lost there's nothing to read back: return zeroes,
+	 * and the host, which polls FNA3D_GetDeviceStatus, knows not to trust them
+	 */
+	if (renderer->deviceLost)
+	{
+		SDL_memset(data, '\0', dataLength);
+		return;
+	}
 
 	VULKAN_INTERNAL_MaybeEndRenderPass(renderer);
 
@@ -7593,6 +7611,15 @@ static void VULKAN_DestroyDevice(FNA3D_Device *device)
 		NULL
 	);
 
+	if (renderer->statusFence != VK_NULL_HANDLE)
+	{
+		renderer->vkDestroyFence(
+			renderer->logicalDevice,
+			renderer->statusFence,
+			NULL
+		);
+	}
+
 	renderer->vkDestroyQueryPool(
 		renderer->logicalDevice,
 		renderer->queryPool,
@@ -7789,6 +7816,17 @@ static FNA3D_DeviceStatus VULKAN_GetDeviceStatus(
 	uint8_t *softwareAdapter
 ) {
 	VulkanRenderer *renderer = (VulkanRenderer*) driverData;
+	if (!renderer->deviceLost && renderer->statusFence != VK_NULL_HANDLE)
+	{
+		/* Ask the driver: a lost device says so here even if nothing has
+		 * failed yet (an idle host submits nothing)
+		 */
+		VULKAN_INTERNAL_CheckLost(
+			renderer,
+			"vkGetFenceStatus",
+			renderer->vkGetFenceStatus(renderer->logicalDevice, renderer->statusFence)
+		);
+	}
 	*reason = renderer->deviceLost ? (uint32_t) renderer->lostReason : 0;
 	*softwareAdapter = (renderer->physicalDeviceProperties.properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU);
 	return renderer->deviceLost ? FNA3D_DEVICESTATUS_LOST : FNA3D_DEVICESTATUS_OK;
@@ -9009,6 +9047,14 @@ static void VULKAN_INTERNAL_SetTextureData(
 	int32_t bufferImageHeight = h;
 	int32_t blockSize = Texture_GetBlockSize(texture->colorFormat);
 
+	/* Once the device is lost, uploads and readbacks do nothing: a transfer
+	 * buffer can't be made any more, and the host recreates the device anyway
+	 */
+	if (renderer->deviceLost)
+	{
+		return;
+	}
+
 	if (blockSize > 1)
 	{
 		bufferRowLength = (bufferRowLength + blockSize - 1) & ~(blockSize - 1);
@@ -9217,6 +9263,14 @@ static void VULKAN_SetTextureDataYUV(
 	int32_t copyLength = SDL_min(dataLength, uploadLength);
 	VkBufferImageCopy imageCopy;
 	VkDeviceSize offset;
+
+	/* Once the device is lost, uploads and readbacks do nothing: a transfer
+	 * buffer can't be made any more, and the host recreates the device anyway
+	 */
+	if (renderer->deviceLost)
+	{
+		return;
+	}
 
 	if (dataLength > uploadLength)
 	{
@@ -11644,6 +11698,24 @@ static FNA3D_Device* VULKAN_CreateDevice(
 		&renderer->defragSemaphore
 	);
 	VULKAN_ERROR_CHECK(vulkanResult, vkCreateSemaphore, NULL)
+
+	/* A fence that's never submitted, for FNA3D_GetDeviceStatus to poll: an
+	 * idle host submits nothing, so nothing else would see a loss. Optional.
+	 */
+	{
+		VkFenceCreateInfo statusFenceInfo;
+		statusFenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+		statusFenceInfo.pNext = NULL;
+		statusFenceInfo.flags = 0;
+		if (renderer->vkCreateFence(
+			renderer->logicalDevice,
+			&statusFenceInfo,
+			NULL,
+			&renderer->statusFence
+		) != VK_SUCCESS) {
+			renderer->statusFence = VK_NULL_HANDLE;
+		}
+	}
 
 	/*
 	 * Create command pool and buffers

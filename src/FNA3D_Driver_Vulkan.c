@@ -1694,10 +1694,35 @@ static inline const char* VkErrorMessages(VkResult code)
 	#undef ERR_TO_STR
 }
 
+/* A lost device isn't an error to log: it's recorded for FNA3D_GetDeviceStatus,
+ * and the host decides what to do. The IDE uses one device, so a file-level flag
+ * is enough.
+ */
+static uint8_t vulkanDeviceLost = 0;
+static VkResult vulkanLostReason = VK_SUCCESS;
+
+static void VULKAN_INTERNAL_MarkLost(const char *where, VkResult res)
+{
+	if (vulkanDeviceLost)
+	{
+		return;
+	}
+	vulkanDeviceLost = 1;
+	vulkanLostReason = res;
+	FNA3D_LogWarn("Vulkan device lost (%s): VK_ERROR_DEVICE_LOST", where);
+}
+
 #define VULKAN_ERROR_CHECK(res, fn, ret) \
 	if (res != VK_SUCCESS) \
 	{ \
-		FNA3D_LogError("%s %s", #fn, VkErrorMessages(res)); \
+		if (res == VK_ERROR_DEVICE_LOST) \
+		{ \
+			VULKAN_INTERNAL_MarkLost(#fn, res); \
+		} \
+		else \
+		{ \
+			FNA3D_LogError("%s %s", #fn, VkErrorMessages(res)); \
+		} \
 		return ret; \
 	}
 
@@ -4641,7 +4666,10 @@ static void VULKAN_INTERNAL_SubmitCommands(
 		if (	acquireResult == VK_ERROR_DEVICE_LOST ||
 			presentResult == VK_ERROR_DEVICE_LOST	)
 		{
-			FNA3D_LogError("Vulkan device was lost!");
+			VULKAN_INTERNAL_MarkLost(
+				(acquireResult == VK_ERROR_DEVICE_LOST) ? "vkAcquireNextImageKHR" : "vkQueuePresentKHR",
+				VK_ERROR_DEVICE_LOST
+			);
 		}
 
 		if (!acquireSuccess)
@@ -7717,6 +7745,26 @@ static void VULKAN_DestroyContext(
 	VULKAN_INTERNAL_FlushCommands(renderer, 1);
 	renderer->vkDeviceWaitIdle(renderer->logicalDevice);
 	VULKAN_INTERNAL_DestroySwapchain(renderer, windowHandle);
+}
+
+/* Device Status */
+
+static FNA3D_DeviceStatus VULKAN_GetDeviceStatus(
+	FNA3D_Renderer *driverData,
+	uint32_t *reason,
+	uint8_t *softwareAdapter
+) {
+	VulkanRenderer *renderer = (VulkanRenderer*) driverData;
+	*reason = vulkanDeviceLost ? (uint32_t) vulkanLostReason : 0;
+	*softwareAdapter = (renderer->physicalDeviceProperties.properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU);
+	return vulkanDeviceLost ? FNA3D_DEVICESTATUS_LOST : FNA3D_DEVICESTATUS_OK;
+}
+
+static void VULKAN_SimulateDeviceLost(
+	FNA3D_Renderer *driverData,
+	uint32_t reason
+) {
+	VULKAN_INTERNAL_MarkLost("simulated", (reason != 0) ? (VkResult) reason : VK_ERROR_DEVICE_LOST);
 }
 
 static void VULKAN_SwapBuffers(

@@ -561,6 +561,43 @@ FNA3DAPI void FNA3D_DestroyContext(
 	void* window
 );
 
+/* Device status */
+
+typedef enum FNA3D_DeviceStatus
+{
+	FNA3D_DEVICESTATUS_OK = 0,
+	/* The device is gone: removed, reset or hung. Nothing drawn or read back
+	 * after this is real, and calls that create resources fail. The host
+	 * has to create a new device (or restart).
+	 */
+	FNA3D_DEVICESTATUS_LOST = 1
+} FNA3D_DeviceStatus;
+
+/* Whether the device is still usable. A lost device is reported here rather
+ * than through the error log: calls that fail because of it don't log errors.
+ * Cheap enough to call every frame; on D3D11 it also asks the driver, so a loss
+ * is seen even when nothing has been drawn since.
+ * device:		The device to check
+ * reason:		Filled with why it was lost, when it was: the HRESULT on D3D11
+ *			(DXGI_ERROR_DEVICE_REMOVED/HUNG/RESET/DRIVER_INTERNAL_ERROR, or
+ *			GetDeviceRemovedReason's), the VkResult on Vulkan. May be NULL.
+ * softwareAdapter:	Filled with 1 if the device runs on a software adapter
+ *			(WARP, the Microsoft Basic Render Driver, a CPU Vulkan
+ *			device), else 0. May be NULL.
+ */
+FNA3DAPI FNA3D_DeviceStatus FNA3D_GetDeviceStatus(
+	FNA3D_Device *device,
+	uint32_t *reason,
+	uint8_t *softwareAdapter
+);
+
+/* Test only: from now on report the device as lost, with the given reason,
+ * as if the driver had. Lets a host try its recovery without a real loss.
+ * device:		The device to mark lost
+ * reason:		What GetDeviceStatus should report (0: a hung device)
+ */
+FNA3DAPI void FNA3D_SimulateDeviceLost(FNA3D_Device *device, uint32_t reason);
+
 /* Presents the backbuffer to the window.
  *
  * sourceRectangle:		The region of the buffer to present (or NULL).

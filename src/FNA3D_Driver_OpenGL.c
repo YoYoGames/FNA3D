@@ -1318,6 +1318,37 @@ static void OPENGL_DestroyContext(
 	/* Nothing to release: all windows share the one GL context */
 }
 
+/* Device Status */
+
+/* OpenGL has no loss detection yet (GL_KHR_robustness is Phase 4 of the plan):
+ * only a simulated loss is reported.
+ */
+static uint8_t openglSimulatedLost = 0;
+static uint32_t openglLostReason = 0;
+
+static FNA3D_DeviceStatus OPENGL_GetDeviceStatus(
+	FNA3D_Renderer *driverData,
+	uint32_t *reason,
+	uint8_t *softwareAdapter
+) {
+	*reason = openglSimulatedLost ? openglLostReason : 0;
+	*softwareAdapter = 0;
+	return openglSimulatedLost ? FNA3D_DEVICESTATUS_LOST : FNA3D_DEVICESTATUS_OK;
+}
+
+static void OPENGL_SimulateDeviceLost(
+	FNA3D_Renderer *driverData,
+	uint32_t reason
+) {
+	if (openglSimulatedLost)
+	{
+		return;
+	}
+	openglSimulatedLost = 1;
+	openglLostReason = reason;
+	FNA3D_LogWarn("OpenGL device lost (simulated)");
+}
+
 static void OPENGL_SwapBuffers(
 	FNA3D_Renderer *driverData,
 	FNA3D_Rect *sourceRectangle,

@@ -169,6 +169,12 @@ typedef struct OpenGLRenderer /* Cast from FNA3D_Renderer* */
 	/* Associated FNA3D_Device */
 	FNA3D_Device *parentDevice;
 
+	/* Device status (FNA3D_GetDeviceStatus): only a simulated loss for now.
+	 * Per device, so a device created after one starts out OK
+	 */
+	uint8_t simulatedLost;
+	uint32_t lostReason;
+
 	/* Context */
 	SDL_GLContext context;
 	uint8_t useES3;
@@ -1320,32 +1326,31 @@ static void OPENGL_DestroyContext(
 
 /* Device Status */
 
-/* OpenGL has no loss detection yet (GL_KHR_robustness is Phase 4 of the plan):
- * only a simulated loss is reported.
+/* OpenGL has no loss detection yet (that needs GL_KHR_robustness): only a
+ * simulated loss is reported.
  */
-static uint8_t openglSimulatedLost = 0;
-static uint32_t openglLostReason = 0;
-
 static FNA3D_DeviceStatus OPENGL_GetDeviceStatus(
 	FNA3D_Renderer *driverData,
 	uint32_t *reason,
 	uint8_t *softwareAdapter
 ) {
-	*reason = openglSimulatedLost ? openglLostReason : 0;
+	OpenGLRenderer *renderer = (OpenGLRenderer*) driverData;
+	*reason = renderer->simulatedLost ? renderer->lostReason : 0;
 	*softwareAdapter = 0;
-	return openglSimulatedLost ? FNA3D_DEVICESTATUS_LOST : FNA3D_DEVICESTATUS_OK;
+	return renderer->simulatedLost ? FNA3D_DEVICESTATUS_LOST : FNA3D_DEVICESTATUS_OK;
 }
 
 static void OPENGL_SimulateDeviceLost(
 	FNA3D_Renderer *driverData,
 	uint32_t reason
 ) {
-	if (openglSimulatedLost)
+	OpenGLRenderer *renderer = (OpenGLRenderer*) driverData;
+	if (renderer->simulatedLost)
 	{
 		return;
 	}
-	openglSimulatedLost = 1;
-	openglLostReason = reason;
+	renderer->simulatedLost = 1;
+	renderer->lostReason = reason;
 	FNA3D_LogWarn("OpenGL device lost (simulated)");
 }
 

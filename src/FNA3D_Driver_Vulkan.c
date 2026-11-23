@@ -1116,6 +1116,12 @@ typedef struct VulkanCommandBuffer
 typedef struct VulkanRenderer
 {
 	FNA3D_Device *parentDevice;
+
+	/* Device status (FNA3D_GetDeviceStatus): per device, so a device created
+	 * after a loss starts out OK
+	 */
+	uint8_t deviceLost;
+	VkResult lostReason;
 	FNA3D_MemoryAllocator *allocator;
 
 	VkInstance instance;
@@ -1695,21 +1701,36 @@ static inline const char* VkErrorMessages(VkResult code)
 }
 
 /* A lost device isn't an error to log: it's recorded for FNA3D_GetDeviceStatus,
- * and the host decides what to do. The IDE uses one device, so a file-level flag
- * is enough.
+ * and the host decides what to do.
  */
-static uint8_t vulkanDeviceLost = 0;
-static VkResult vulkanLostReason = VK_SUCCESS;
-
-static void VULKAN_INTERNAL_MarkLost(const char *where, VkResult res)
-{
-	if (vulkanDeviceLost)
+static void VULKAN_INTERNAL_MarkLost(
+	VulkanRenderer *renderer,
+	const char *where,
+	VkResult res
+) {
+	if (renderer->deviceLost)
 	{
 		return;
 	}
-	vulkanDeviceLost = 1;
-	vulkanLostReason = res;
-	FNA3D_LogWarn("Vulkan device lost (%s): VK_ERROR_DEVICE_LOST", where);
+	renderer->deviceLost = 1;
+	renderer->lostReason = res;
+	FNA3D_LogWarn("Vulkan device lost (%s)", where);
+}
+
+/* For results checked outside VULKAN_ERROR_CHECK: record a lost device. Returns
+ * true if the result was VK_ERROR_DEVICE_LOST.
+ */
+static inline uint8_t VULKAN_INTERNAL_CheckLost(
+	VulkanRenderer *renderer,
+	const char *where,
+	VkResult res
+) {
+	if (res == VK_ERROR_DEVICE_LOST)
+	{
+		VULKAN_INTERNAL_MarkLost(renderer, where, res);
+		return 1;
+	}
+	return 0;
 }
 
 #define VULKAN_ERROR_CHECK(res, fn, ret) \
@@ -1717,7 +1738,7 @@ static void VULKAN_INTERNAL_MarkLost(const char *where, VkResult res)
 	{ \
 		if (res == VK_ERROR_DEVICE_LOST) \
 		{ \
-			VULKAN_INTERNAL_MarkLost(#fn, res); \
+			VULKAN_INTERNAL_MarkLost(renderer, #fn, res); \
 		} \
 		else \
 		{ \
@@ -4513,7 +4534,10 @@ static void VULKAN_INTERNAL_SubmitCommands(
 	 */
 	if (result != VK_SUCCESS)
 	{
-		FNA3D_LogWarn("vkWaitForFences: %s", VkErrorMessages(result));
+		if (!VULKAN_INTERNAL_CheckLost(renderer, "vkWaitForFences", result))
+		{
+			FNA3D_LogWarn("vkWaitForFences: %s", VkErrorMessages(result));
+		}
 		return;
 	}
 
@@ -4667,6 +4691,7 @@ static void VULKAN_INTERNAL_SubmitCommands(
 			presentResult == VK_ERROR_DEVICE_LOST	)
 		{
 			VULKAN_INTERNAL_MarkLost(
+				renderer,
 				(acquireResult == VK_ERROR_DEVICE_LOST) ? "vkAcquireNextImageKHR" : "vkQueuePresentKHR",
 				VK_ERROR_DEVICE_LOST
 			);
@@ -4704,7 +4729,8 @@ static void VULKAN_INTERNAL_FlushCommands(VulkanRenderer *renderer, uint8_t sync
 	{
 		result = renderer->vkDeviceWaitIdle(renderer->logicalDevice);
 
-		if (result != VK_SUCCESS)
+		if (	result != VK_SUCCESS &&
+			!VULKAN_INTERNAL_CheckLost(renderer, "vkDeviceWaitIdle", result)	)
 		{
 			FNA3D_LogWarn("vkDeviceWaitIdle: %s", VkErrorMessages(result));
 		}
@@ -5311,7 +5337,11 @@ static void VULKAN_INTERNAL_RecreateSwapchain(
 ) {
 	CreateSwapchainResult createSwapchainResult;
 
-	renderer->vkDeviceWaitIdle(renderer->logicalDevice);
+	VULKAN_INTERNAL_CheckLost(
+		renderer,
+		"vkDeviceWaitIdle",
+		renderer->vkDeviceWaitIdle(renderer->logicalDevice)
+	);
 
 	VULKAN_INTERNAL_DestroySwapchain(renderer, windowHandle);
 	createSwapchainResult = VULKAN_INTERNAL_CreateSwapchain(renderer, windowHandle);
@@ -5321,7 +5351,11 @@ static void VULKAN_INTERNAL_RecreateSwapchain(
 		return;
 	}
 
-	renderer->vkDeviceWaitIdle(renderer->logicalDevice);
+	VULKAN_INTERNAL_CheckLost(
+		renderer,
+		"vkDeviceWaitIdle",
+		renderer->vkDeviceWaitIdle(renderer->logicalDevice)
+	);
 }
 
 /* Vulkan: Buffer Objects */
@@ -5436,13 +5470,13 @@ static void VULKAN_INTERNAL_SetBufferData(
 			commandBuffer = (VulkanCommandBuffer*) FNA3D_CommandBuffer_GetDefragBuffer(
 				renderer->commandBuffers
 			);
-			renderer->vkWaitForFences(
+			VULKAN_INTERNAL_CheckLost(renderer, "vkWaitForFences", renderer->vkWaitForFences(
 				renderer->logicalDevice,
 				1,
 				&commandBuffer->inFlightFence,
 				VK_TRUE,
 				UINT64_MAX
-			);
+			));
 
 			renderer->bufferDefragInProgress = 0;
 		}
@@ -7755,16 +7789,17 @@ static FNA3D_DeviceStatus VULKAN_GetDeviceStatus(
 	uint8_t *softwareAdapter
 ) {
 	VulkanRenderer *renderer = (VulkanRenderer*) driverData;
-	*reason = vulkanDeviceLost ? (uint32_t) vulkanLostReason : 0;
+	*reason = renderer->deviceLost ? (uint32_t) renderer->lostReason : 0;
 	*softwareAdapter = (renderer->physicalDeviceProperties.properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU);
-	return vulkanDeviceLost ? FNA3D_DEVICESTATUS_LOST : FNA3D_DEVICESTATUS_OK;
+	return renderer->deviceLost ? FNA3D_DEVICESTATUS_LOST : FNA3D_DEVICESTATUS_OK;
 }
 
 static void VULKAN_SimulateDeviceLost(
 	FNA3D_Renderer *driverData,
 	uint32_t reason
 ) {
-	VULKAN_INTERNAL_MarkLost("simulated", (reason != 0) ? (VkResult) reason : VK_ERROR_DEVICE_LOST);
+	VulkanRenderer *renderer = (VulkanRenderer*) driverData;
+	VULKAN_INTERNAL_MarkLost(renderer, "simulated", (reason != 0) ? (VkResult) reason : VK_ERROR_DEVICE_LOST);
 }
 
 static void VULKAN_SwapBuffers(
@@ -10560,7 +10595,10 @@ static void VULKAN_Memory_EndDefragCommands(FNA3D_Renderer *driverData)
 	);
 	if (result != VK_SUCCESS)
 	{
-		FNA3D_LogError("vkResetFences: %s", VkErrorMessages(result));
+		if (!VULKAN_INTERNAL_CheckLost(renderer, "vkResetFences", result))
+		{
+			FNA3D_LogError("vkResetFences: %s", VkErrorMessages(result));
+		}
 		return;
 	}
 
@@ -10572,7 +10610,10 @@ static void VULKAN_Memory_EndDefragCommands(FNA3D_Renderer *driverData)
 	);
 	if (result != VK_SUCCESS)
 	{
-		FNA3D_LogError("vkQueueSubmit: %s", VkErrorMessages(result));
+		if (!VULKAN_INTERNAL_CheckLost(renderer, "vkQueueSubmit", result))
+		{
+			FNA3D_LogError("vkQueueSubmit: %s", VkErrorMessages(result));
+		}
 		return;
 	}
 
@@ -11084,14 +11125,22 @@ static uint8_t VULKAN_CommandBuffer_QueryFence(
 	VulkanRenderer *renderer = (VulkanRenderer*) driverData;
 	VulkanCommandBuffer *commandBuffer = (VulkanCommandBuffer*) handle;
 
+	VkResult result;
+
 	/* If we set a timeout of 0, we can query the command buffer state */
-	return renderer->vkWaitForFences(
+	result = renderer->vkWaitForFences(
 		renderer->logicalDevice,
 		1,
 		&commandBuffer->inFlightFence,
 		VK_TRUE,
 		0
-	) == VK_SUCCESS;
+	);
+
+	/* A lost device never signals its fences: count the buffer as done, so
+	 * it's cleaned up rather than kept (and a new one made) every frame
+	 */
+	return	result == VK_SUCCESS ||
+		VULKAN_INTERNAL_CheckLost(renderer, "vkWaitForFences", result);
 }
 
 static void VULKAN_CommandBuffer_WaitForFences(
@@ -11110,13 +11159,13 @@ static void VULKAN_CommandBuffer_WaitForFences(
 		fences[i] = commandBuffers[i]->inFlightFence;
 	}
 
-	renderer->vkWaitForFences(
+	VULKAN_INTERNAL_CheckLost(renderer, "vkWaitForFences", renderer->vkWaitForFences(
 		renderer->logicalDevice,
 		handleCount,
 		fences,
 		VK_TRUE,
 		UINT64_MAX
-	);
+	));
 
 	SDL_stack_free(fences);
 }

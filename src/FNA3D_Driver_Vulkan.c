@@ -5492,6 +5492,14 @@ static void VULKAN_INTERNAL_SetBufferData(
 				renderer->allocator,
 				container
 			);
+
+			/* No new buffer could be made (out of memory, or a loss
+			 * nothing has recorded yet): drop the write
+			 */
+			if (vulkanBuffer == NULL)
+			{
+				return;
+			}
 		}
 
 		/* If this is a defrag frame and NoOverwrite is set, wait for defrag to avoid data race */

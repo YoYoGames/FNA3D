@@ -2,3 +2,6 @@
 	path = MojoShader
 	url = https://github.com/icculus/mojoshader
 	branch = main
+[submodule "Vulkan-Headers"]
+	path = Vulkan-Headers
+	url = https://github.com/KhronosGroup/Vulkan-Headers

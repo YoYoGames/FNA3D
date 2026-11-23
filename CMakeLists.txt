@@ -49,6 +49,7 @@ endif()
 
 # Defines
 add_definitions(
+	-DFNA3D_DRIVER_VULKAN
 	-DFNA3D_DRIVER_OPENGL
 )
 if(BUILD_SDL3)
@@ -87,6 +88,9 @@ else()
 endif()
 
 if(EMSCRIPTEN)
+	remove_definitions(
+		-DFNA3D_DRIVER_VULKAN
+	)
 	add_definitions(
 		-DSUPPORT_PROFILE_GLSPIRV=0
 		-DSUPPORT_PROFILE_SPIRV=0
@@ -108,13 +112,19 @@ add_library(FNA3D
 	src/FNA3D_Driver.h
 	src/FNA3D_Driver_OpenGL.h
 	src/FNA3D_Driver_OpenGL_glfuncs.h
+	src/FNA3D_Driver_Vulkan_vkfuncs.h
+	src/FNA3D_CommandBuffer.h
+	src/FNA3D_Memory.h
 	src/FNA3D_PipelineCache.h
 	# Source Files
 	src/FNA3D.c
 	src/FNA3D_Driver_D3D11.c
 	src/FNA3D_Driver_OpenGL.c
 	src/FNA3D_Driver_SDL.c
+	src/FNA3D_Driver_Vulkan.c
 	src/FNA3D_Image.c
+	src/FNA3D_CommandBuffer.c
+	src/FNA3D_Memory.c
 	src/FNA3D_PipelineCache.c
 	src/FNA3D_Tracing.c
 )
@@ -124,6 +134,7 @@ add_library(mojoshader STATIC
 	MojoShader/mojoshader_common.c
 	MojoShader/mojoshader_d3d11.c
 	MojoShader/mojoshader_opengl.c
+	MojoShader/mojoshader_vulkan.c
 	MojoShader/mojoshader_sdlgpu.c
 	MojoShader/profiles/mojoshader_profile_common.c
 	MojoShader/profiles/mojoshader_profile_glsl.c
@@ -158,6 +169,7 @@ endif()
 target_include_directories(FNA3D PUBLIC
 	$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
 	$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+	$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/Vulkan-Headers/include>
 )
 if(BUILD_DXVK_NATIVE)
 	add_definitions(-DFNA3D_DXVK_NATIVE)
@@ -166,6 +178,7 @@ if(BUILD_DXVK_NATIVE)
 endif()
 target_include_directories(mojoshader PUBLIC
 	$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/MojoShader>
+	$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/Vulkan-Headers/include>
 )
 
 # MinGW builds should statically link libgcc

@@ -519,6 +519,10 @@ static inline void GraphicsPipelineHashTable_Insert(
 typedef struct SDLGPU_Renderer
 {
 	SDL_GPUDevice *device;
+
+	/* Device status (FNA3D_GetDeviceStatus): only a simulated loss */
+	uint8_t simulatedLost;
+	uint32_t lostReason;
 	SDL_GPUCommandBuffer *renderCommandBuffer;
 	SDL_GPUCommandBuffer *uploadCommandBuffer;
 
@@ -1219,6 +1223,41 @@ static void SDLGPU_SwapBuffers(
 	renderer->boundRenderTargetCount = 0;
 
 	SDL_UnlockMutex(renderer->copyPassMutex);
+}
+
+static void SDLGPU_DestroyContext(
+	FNA3D_Renderer *driverData,
+	void* window
+) {
+	/* TODO: release the window's claim, as VULKAN_DestroyContext does */
+}
+
+/* Device Status */
+
+/* SDL_GPU has no device-loss query: only a simulated loss is reported */
+static FNA3D_DeviceStatus SDLGPU_GetDeviceStatus(
+	FNA3D_Renderer *driverData,
+	uint32_t *reason,
+	uint8_t *softwareAdapter
+) {
+	SDLGPU_Renderer *renderer = (SDLGPU_Renderer*) driverData;
+	*reason = renderer->simulatedLost ? renderer->lostReason : 0;
+	*softwareAdapter = 0;
+	return renderer->simulatedLost ? FNA3D_DEVICESTATUS_LOST : FNA3D_DEVICESTATUS_OK;
+}
+
+static void SDLGPU_SimulateDeviceLost(
+	FNA3D_Renderer *driverData,
+	uint32_t reason
+) {
+	SDLGPU_Renderer *renderer = (SDLGPU_Renderer*) driverData;
+	if (renderer->simulatedLost)
+	{
+		return;
+	}
+	renderer->simulatedLost = 1;
+	renderer->lostReason = reason;
+	FNA3D_LogWarn("SDL_GPU device lost (simulated)");
 }
 
 /* GDK Support */

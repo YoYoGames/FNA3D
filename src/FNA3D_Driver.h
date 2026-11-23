@@ -319,6 +319,18 @@ struct FNA3D_Device
 		void* window
 	);
 
+	/* Device Status */
+
+	FNA3D_DeviceStatus (*GetDeviceStatus)(
+		FNA3D_Renderer *driverData,
+		uint32_t *reason,
+		uint8_t *softwareAdapter
+	);
+	void (*SimulateDeviceLost)(
+		FNA3D_Renderer *driverData,
+		uint32_t reason
+	);
+
 	/* Drawing */
 
 	void (*Clear)(
@@ -754,6 +766,8 @@ struct FNA3D_Device
 	ASSIGN_DRIVER_FUNC(DestroyDevice, name) \
 	ASSIGN_DRIVER_FUNC(SwapBuffers, name) \
 	ASSIGN_DRIVER_FUNC(DestroyContext, name) \
+	ASSIGN_DRIVER_FUNC(GetDeviceStatus, name) \
+	ASSIGN_DRIVER_FUNC(SimulateDeviceLost, name) \
 	ASSIGN_DRIVER_FUNC(Clear, name) \
 	ASSIGN_DRIVER_FUNC(DrawIndexedPrimitives, name) \
 	ASSIGN_DRIVER_FUNC(DrawInstancedPrimitives, name) \

@@ -295,6 +295,38 @@ void FNA3D_DestroyContext(
 	device->DestroyContext(device->driverData, window);
 }
 
+FNA3D_DeviceStatus FNA3D_GetDeviceStatus(
+	FNA3D_Device *device,
+	uint32_t *reason,
+	uint8_t *softwareAdapter
+) {
+	uint32_t r = 0;
+	uint8_t sw = 0;
+	FNA3D_DeviceStatus status = FNA3D_DEVICESTATUS_OK;
+	if (device != NULL)
+	{
+		status = device->GetDeviceStatus(device->driverData, &r, &sw);
+	}
+	if (reason != NULL)
+	{
+		*reason = r;
+	}
+	if (softwareAdapter != NULL)
+	{
+		*softwareAdapter = sw;
+	}
+	return status;
+}
+
+void FNA3D_SimulateDeviceLost(FNA3D_Device *device, uint32_t reason)
+{
+	if (device == NULL)
+	{
+		return;
+	}
+	device->SimulateDeviceLost(device->driverData, reason);
+}
+
 /* Drawing */
 
 void FNA3D_Clear(

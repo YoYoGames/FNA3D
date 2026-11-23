@@ -1088,10 +1088,19 @@ FNA3D_BufferHandle* FNA3D_Memory_DiscardActiveBuffer(
 	/* If no buffer is available, generate a new one. */
 	if (i == container->bufferCount)
 	{
-		container->activeBuffer = allocator->driver.CloneBufferHandle(
+		FNA3D_BufferHandle *clone = allocator->driver.CloneBufferHandle(
 			allocator->driver.driverData,
 			container->activeBuffer
 		);
+
+		/* Out of memory, or the device is lost: keep the active buffer, so
+		 * the container never holds a NULL one, and tell the caller
+		 */
+		if (clone == NULL)
+		{
+			return NULL;
+		}
+		container->activeBuffer = clone;
 
 		if (container->bufferCount >= container->bufferCapacity)
 		{

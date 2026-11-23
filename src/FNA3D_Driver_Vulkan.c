@@ -1116,6 +1116,13 @@ typedef struct VulkanCommandBuffer
 typedef struct VulkanRenderer
 {
 	FNA3D_Device *parentDevice;
+
+	/* Device status (FNA3D_GetDeviceStatus): per device, so a device created
+	 * after a loss starts out OK
+	 */
+	uint8_t deviceLost;
+	VkResult lostReason;
+	VkFence statusFence; /* never submitted: polled for VK_ERROR_DEVICE_LOST */
 	FNA3D_MemoryAllocator *allocator;
 
 	VkInstance instance;
@@ -1694,10 +1701,50 @@ static inline const char* VkErrorMessages(VkResult code)
 	#undef ERR_TO_STR
 }
 
+/* A lost device isn't an error to log: it's recorded for FNA3D_GetDeviceStatus,
+ * and the host decides what to do.
+ */
+static void VULKAN_INTERNAL_MarkLost(
+	VulkanRenderer *renderer,
+	const char *where,
+	VkResult res
+) {
+	if (renderer->deviceLost)
+	{
+		return;
+	}
+	renderer->deviceLost = 1;
+	renderer->lostReason = res;
+	FNA3D_LogWarn("Vulkan device lost (%s)", where);
+}
+
+/* For results checked outside VULKAN_ERROR_CHECK: record a lost device. Returns
+ * true if the result was VK_ERROR_DEVICE_LOST.
+ */
+static inline uint8_t VULKAN_INTERNAL_CheckLost(
+	VulkanRenderer *renderer,
+	const char *where,
+	VkResult res
+) {
+	if (res == VK_ERROR_DEVICE_LOST)
+	{
+		VULKAN_INTERNAL_MarkLost(renderer, where, res);
+		return 1;
+	}
+	return 0;
+}
+
 #define VULKAN_ERROR_CHECK(res, fn, ret) \
 	if (res != VK_SUCCESS) \
 	{ \
-		FNA3D_LogError("%s %s", #fn, VkErrorMessages(res)); \
+		if (res == VK_ERROR_DEVICE_LOST) \
+		{ \
+			VULKAN_INTERNAL_MarkLost(renderer, #fn, res); \
+		} \
+		else \
+		{ \
+			FNA3D_LogError("%s %s", #fn, VkErrorMessages(res)); \
+		} \
 		return ret; \
 	}
 
@@ -3430,7 +3477,10 @@ static inline VkDeviceSize VULKAN_INTERNAL_NextHighestAlignment(
 	return align * ((n + align - 1) / align);
 }
 
-static void VULKAN_INTERNAL_CopyToTransferBuffer(
+/* Returns 0 if no transfer buffer could be had (out of memory, or the device is
+ * lost): the caller must unlock and bail out
+ */
+static uint8_t VULKAN_INTERNAL_CopyToTransferBuffer(
 	VulkanRenderer *renderer,
 	void* data,
 	uint32_t uploadLength,
@@ -3452,6 +3502,10 @@ static void VULKAN_INTERNAL_CopyToTransferBuffer(
 		uploadLength,
 		fmtAlignment
 	);
+	if (transferBuffer == NULL || transferBuffer->buffer == NULL)
+	{
+		return 0;
+	}
 	parentBuffer = (VulkanBuffer*) transferBuffer->buffer;
 
 	transferBufferPointer = FNA3D_Memory_GetHostPointer(
@@ -3469,9 +3523,11 @@ static void VULKAN_INTERNAL_CopyToTransferBuffer(
 	*pOffset = transferBuffer->offset;
 
 	transferBuffer->offset += copyLength;
+	return 1;
 }
 
-static void VULKAN_INTERNAL_PrepareCopyFromTransferBuffer(
+/* Returns 0 if no transfer buffer could be had: see CopyToTransferBuffer */
+static uint8_t VULKAN_INTERNAL_PrepareCopyFromTransferBuffer(
 	VulkanRenderer *renderer,
 	VkDeviceSize dataLength,
 	VkDeviceSize alignment,
@@ -3488,13 +3544,20 @@ static void VULKAN_INTERNAL_PrepareCopyFromTransferBuffer(
 		dataLength,
 		fmtAlignment
 	);
-	VulkanBuffer *parentBuffer = (VulkanBuffer*) transferBuffer->buffer;
+	VulkanBuffer *parentBuffer;
+
+	if (transferBuffer == NULL || transferBuffer->buffer == NULL)
+	{
+		return 0;
+	}
+	parentBuffer = (VulkanBuffer*) transferBuffer->buffer;
 
 	*pTransferBuffer = transferBuffer;
 	*pTransferBufferPointer = FNA3D_Memory_GetHostPointer(
 		parentBuffer->usedRegion,
 		transferBuffer->offset
 	);
+	return 1;
 }
 
 /* Vulkan: Descriptor Set Logic */
@@ -4488,7 +4551,10 @@ static void VULKAN_INTERNAL_SubmitCommands(
 	 */
 	if (result != VK_SUCCESS)
 	{
-		FNA3D_LogWarn("vkWaitForFences: %s", VkErrorMessages(result));
+		if (!VULKAN_INTERNAL_CheckLost(renderer, "vkWaitForFences", result))
+		{
+			FNA3D_LogWarn("vkWaitForFences: %s", VkErrorMessages(result));
+		}
 		return;
 	}
 
@@ -4641,7 +4707,11 @@ static void VULKAN_INTERNAL_SubmitCommands(
 		if (	acquireResult == VK_ERROR_DEVICE_LOST ||
 			presentResult == VK_ERROR_DEVICE_LOST	)
 		{
-			FNA3D_LogError("Vulkan device was lost!");
+			VULKAN_INTERNAL_MarkLost(
+				renderer,
+				(acquireResult == VK_ERROR_DEVICE_LOST) ? "vkAcquireNextImageKHR" : "vkQueuePresentKHR",
+				VK_ERROR_DEVICE_LOST
+			);
 		}
 
 		if (!acquireSuccess)
@@ -4676,7 +4746,8 @@ static void VULKAN_INTERNAL_FlushCommands(VulkanRenderer *renderer, uint8_t sync
 	{
 		result = renderer->vkDeviceWaitIdle(renderer->logicalDevice);
 
-		if (result != VK_SUCCESS)
+		if (	result != VK_SUCCESS &&
+			!VULKAN_INTERNAL_CheckLost(renderer, "vkDeviceWaitIdle", result)	)
 		{
 			FNA3D_LogWarn("vkDeviceWaitIdle: %s", VkErrorMessages(result));
 		}
@@ -5283,7 +5354,11 @@ static void VULKAN_INTERNAL_RecreateSwapchain(
 ) {
 	CreateSwapchainResult createSwapchainResult;
 
-	renderer->vkDeviceWaitIdle(renderer->logicalDevice);
+	VULKAN_INTERNAL_CheckLost(
+		renderer,
+		"vkDeviceWaitIdle",
+		renderer->vkDeviceWaitIdle(renderer->logicalDevice)
+	);
 
 	VULKAN_INTERNAL_DestroySwapchain(renderer, windowHandle);
 	createSwapchainResult = VULKAN_INTERNAL_CreateSwapchain(renderer, windowHandle);
@@ -5293,7 +5368,11 @@ static void VULKAN_INTERNAL_RecreateSwapchain(
 		return;
 	}
 
-	renderer->vkDeviceWaitIdle(renderer->logicalDevice);
+	VULKAN_INTERNAL_CheckLost(
+		renderer,
+		"vkDeviceWaitIdle",
+		renderer->vkDeviceWaitIdle(renderer->logicalDevice)
+	);
 }
 
 /* Vulkan: Buffer Objects */
@@ -5315,6 +5394,14 @@ static void VULKAN_INTERNAL_SetBufferData(
 	VkDeviceSize transferOffset;
 	VkBufferCopy bufferCopy;
 	VulkanResourceAccessType accessType;
+
+	/* Once the device is lost, uploads and readbacks do nothing: a transfer
+	 * buffer can't be made any more, and the host recreates the device anyway
+	 */
+	if (renderer->deviceLost)
+	{
+		return;
+	}
 
 	vulkanBuffer = (VulkanBuffer*) FNA3D_Memory_GetActiveBuffer(container);
 	accessType = vulkanBuffer->resourceAccessType;
@@ -5339,15 +5426,20 @@ static void VULKAN_INTERNAL_SetBufferData(
 
 		FNA3D_CommandBuffer_LockForTransfer(renderer->commandBuffers);
 
-		VULKAN_INTERNAL_CopyToTransferBuffer(
-			renderer,
-			data,
-			dataLength,
-			dataLength,
-			&transferBuffer,
-			&transferOffset,
-			renderer->physicalDeviceProperties.properties.limits.optimalBufferCopyOffsetAlignment
-		);
+		if (!VULKAN_INTERNAL_CopyToTransferBuffer(
+				renderer,
+				data,
+				dataLength,
+				dataLength,
+				&transferBuffer,
+				&transferOffset,
+				renderer->physicalDeviceProperties.properties.limits.optimalBufferCopyOffsetAlignment
+			))
+		{
+			FNA3D_CommandBuffer_UnlockFromTransfer(renderer->commandBuffers);
+			SDL_UnlockMutex(renderer->passLock);
+			return;
+		}
 
 		VULKAN_INTERNAL_BufferMemoryBarrier(
 			renderer,
@@ -5400,6 +5492,14 @@ static void VULKAN_INTERNAL_SetBufferData(
 				renderer->allocator,
 				container
 			);
+
+			/* No new buffer could be made (out of memory, or a loss
+			 * nothing has recorded yet): drop the write
+			 */
+			if (vulkanBuffer == NULL)
+			{
+				return;
+			}
 		}
 
 		/* If this is a defrag frame and NoOverwrite is set, wait for defrag to avoid data race */
@@ -5408,13 +5508,13 @@ static void VULKAN_INTERNAL_SetBufferData(
 			commandBuffer = (VulkanCommandBuffer*) FNA3D_CommandBuffer_GetDefragBuffer(
 				renderer->commandBuffers
 			);
-			renderer->vkWaitForFences(
+			VULKAN_INTERNAL_CheckLost(renderer, "vkWaitForFences", renderer->vkWaitForFences(
 				renderer->logicalDevice,
 				1,
 				&commandBuffer->inFlightFence,
 				VK_TRUE,
 				UINT64_MAX
-			);
+			));
 
 			renderer->bufferDefragInProgress = 0;
 		}
@@ -5624,21 +5724,36 @@ static void VULKAN_INTERNAL_GetTextureData(
 	uint8_t *dataPtr = (uint8_t*) data;
 	uint8_t *transferBufferPointer;
 
+	/* Once the device is lost there's nothing to read back: return zeroes,
+	 * and the host, which polls FNA3D_GetDeviceStatus, knows not to trust them
+	 */
+	if (renderer->deviceLost)
+	{
+		SDL_memset(data, '\0', dataLength);
+		return;
+	}
+
 	VULKAN_INTERNAL_MaybeEndRenderPass(renderer);
 
 	SDL_LockMutex(renderer->passLock);
 	FNA3D_CommandBuffer_LockForTransfer(renderer->commandBuffers);
 
-	VULKAN_INTERNAL_PrepareCopyFromTransferBuffer(
-		renderer,
-		dataLength,
-		/* The Vulkan spec states: bufferOffset must be a multiple of 4
-		 * https://vulkan.lunarg.com/doc/view/1.2.141.0/windows/1.2-extensions/vkspec.html#VUID-VkBufferImageCopy-bufferOffset-00194
-		 */
-		(VkDeviceSize)SDL_max(Texture_GetFormatSize(vulkanTexture->colorFormat), 4),
-		&transferBuffer,
-		(void**) &transferBufferPointer
-	);
+	if (!VULKAN_INTERNAL_PrepareCopyFromTransferBuffer(
+			renderer,
+			dataLength,
+			/* The Vulkan spec states: bufferOffset must be a multiple of 4
+			 * https://vulkan.lunarg.com/doc/view/1.2.141.0/windows/1.2-extensions/vkspec.html#VUID-VkBufferImageCopy-bufferOffset-00194
+			 */
+			(VkDeviceSize)SDL_max(Texture_GetFormatSize(vulkanTexture->colorFormat), 4),
+			&transferBuffer,
+			(void**) &transferBufferPointer
+		))
+	{
+		SDL_memset(data, '\0', dataLength);
+		FNA3D_CommandBuffer_UnlockFromTransfer(renderer->commandBuffers);
+		SDL_UnlockMutex(renderer->passLock);
+		return;
+	}
 
 	/* Cache this so we can restore it later */
 	prevResourceAccess = vulkanTexture->resourceAccessType;
@@ -7531,6 +7646,15 @@ static void VULKAN_DestroyDevice(FNA3D_Device *device)
 		NULL
 	);
 
+	if (renderer->statusFence != VK_NULL_HANDLE)
+	{
+		renderer->vkDestroyFence(
+			renderer->logicalDevice,
+			renderer->statusFence,
+			NULL
+		);
+	}
+
 	renderer->vkDestroyQueryPool(
 		renderer->logicalDevice,
 		renderer->queryPool,
@@ -7717,6 +7841,44 @@ static void VULKAN_DestroyContext(
 	VULKAN_INTERNAL_FlushCommands(renderer, 1);
 	renderer->vkDeviceWaitIdle(renderer->logicalDevice);
 	VULKAN_INTERNAL_DestroySwapchain(renderer, windowHandle);
+}
+
+/* Device Status */
+
+static FNA3D_DeviceStatus VULKAN_GetDeviceStatus(
+	FNA3D_Renderer *driverData,
+	uint32_t *reason,
+	uint8_t *softwareAdapter
+) {
+	VulkanRenderer *renderer = (VulkanRenderer*) driverData;
+	if (!renderer->deviceLost && renderer->statusFence != VK_NULL_HANDLE)
+	{
+		/* Ask the driver: a lost device says so here even if nothing has
+		 * failed yet (an idle host submits nothing)
+		 */
+		/* It's never submitted, so a working device can only say NOT_READY:
+		 * once the device is lost it may say SUCCESS instead of DEVICE_LOST
+		 */
+		VkResult res = renderer->vkGetFenceStatus(
+			renderer->logicalDevice,
+			renderer->statusFence
+		);
+		if (res != VK_NOT_READY)
+		{
+			VULKAN_INTERNAL_MarkLost(renderer, "vkGetFenceStatus", VK_ERROR_DEVICE_LOST);
+		}
+	}
+	*reason = renderer->deviceLost ? (uint32_t) renderer->lostReason : 0;
+	*softwareAdapter = (renderer->physicalDeviceProperties.properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU);
+	return renderer->deviceLost ? FNA3D_DEVICESTATUS_LOST : FNA3D_DEVICESTATUS_OK;
+}
+
+static void VULKAN_SimulateDeviceLost(
+	FNA3D_Renderer *driverData,
+	uint32_t reason
+) {
+	VulkanRenderer *renderer = (VulkanRenderer*) driverData;
+	VULKAN_INTERNAL_MarkLost(renderer, "simulated", (reason != 0) ? (VkResult) reason : VK_ERROR_DEVICE_LOST);
 }
 
 static void VULKAN_SwapBuffers(
@@ -8926,6 +9088,14 @@ static void VULKAN_INTERNAL_SetTextureData(
 	int32_t bufferImageHeight = h;
 	int32_t blockSize = Texture_GetBlockSize(texture->colorFormat);
 
+	/* Once the device is lost, uploads and readbacks do nothing: a transfer
+	 * buffer can't be made any more, and the host recreates the device anyway
+	 */
+	if (renderer->deviceLost)
+	{
+		return;
+	}
+
 	if (blockSize > 1)
 	{
 		bufferRowLength = (bufferRowLength + blockSize - 1) & ~(blockSize - 1);
@@ -8948,15 +9118,20 @@ static void VULKAN_INTERNAL_SetTextureData(
 	SDL_LockMutex(renderer->passLock);
 	FNA3D_CommandBuffer_LockForTransfer(renderer->commandBuffers);
 
-	VULKAN_INTERNAL_CopyToTransferBuffer(
-		renderer,
-		data,
-		uploadLength,
-		copyLength,
-		&transferBuffer,
-		&offset,
-		(VkDeviceSize)Texture_GetFormatSize(texture->colorFormat)
-	);
+	if (!VULKAN_INTERNAL_CopyToTransferBuffer(
+			renderer,
+			data,
+			uploadLength,
+			copyLength,
+			&transferBuffer,
+			&offset,
+			(VkDeviceSize)Texture_GetFormatSize(texture->colorFormat)
+		))
+	{
+		FNA3D_CommandBuffer_UnlockFromTransfer(renderer->commandBuffers);
+		SDL_UnlockMutex(renderer->passLock);
+		return;
+	}
 
 	VULKAN_INTERNAL_BufferMemoryBarrier(
 		renderer,
@@ -9135,6 +9310,14 @@ static void VULKAN_SetTextureDataYUV(
 	VkBufferImageCopy imageCopy;
 	VkDeviceSize offset;
 
+	/* Once the device is lost, uploads and readbacks do nothing: a transfer
+	 * buffer can't be made any more, and the host recreates the device anyway
+	 */
+	if (renderer->deviceLost)
+	{
+		return;
+	}
+
 	if (dataLength > uploadLength)
 	{
 		FNA3D_LogWarn(
@@ -9149,15 +9332,20 @@ static void VULKAN_SetTextureDataYUV(
 	SDL_LockMutex(renderer->passLock);
 	FNA3D_CommandBuffer_LockForTransfer(renderer->commandBuffers);
 
-	VULKAN_INTERNAL_CopyToTransferBuffer(
-		renderer,
-		data,
-		uploadLength,
-		copyLength,
-		&transferBuffer,
-		&offset,
-		(VkDeviceSize)Texture_GetFormatSize(FNA3D_SURFACEFORMAT_ALPHA8)
-	);
+	if (!VULKAN_INTERNAL_CopyToTransferBuffer(
+			renderer,
+			data,
+			uploadLength,
+			copyLength,
+			&transferBuffer,
+			&offset,
+			(VkDeviceSize)Texture_GetFormatSize(FNA3D_SURFACEFORMAT_ALPHA8)
+		))
+	{
+		FNA3D_CommandBuffer_UnlockFromTransfer(renderer->commandBuffers);
+		SDL_UnlockMutex(renderer->passLock);
+		return;
+	}
 
 	VULKAN_INTERNAL_BufferMemoryBarrier(
 		renderer,
@@ -10512,7 +10700,10 @@ static void VULKAN_Memory_EndDefragCommands(FNA3D_Renderer *driverData)
 	);
 	if (result != VK_SUCCESS)
 	{
-		FNA3D_LogError("vkResetFences: %s", VkErrorMessages(result));
+		if (!VULKAN_INTERNAL_CheckLost(renderer, "vkResetFences", result))
+		{
+			FNA3D_LogError("vkResetFences: %s", VkErrorMessages(result));
+		}
 		return;
 	}
 
@@ -10524,7 +10715,10 @@ static void VULKAN_Memory_EndDefragCommands(FNA3D_Renderer *driverData)
 	);
 	if (result != VK_SUCCESS)
 	{
-		FNA3D_LogError("vkQueueSubmit: %s", VkErrorMessages(result));
+		if (!VULKAN_INTERNAL_CheckLost(renderer, "vkQueueSubmit", result))
+		{
+			FNA3D_LogError("vkQueueSubmit: %s", VkErrorMessages(result));
+		}
 		return;
 	}
 
@@ -11036,14 +11230,22 @@ static uint8_t VULKAN_CommandBuffer_QueryFence(
 	VulkanRenderer *renderer = (VulkanRenderer*) driverData;
 	VulkanCommandBuffer *commandBuffer = (VulkanCommandBuffer*) handle;
 
+	VkResult result;
+
 	/* If we set a timeout of 0, we can query the command buffer state */
-	return renderer->vkWaitForFences(
+	result = renderer->vkWaitForFences(
 		renderer->logicalDevice,
 		1,
 		&commandBuffer->inFlightFence,
 		VK_TRUE,
 		0
-	) == VK_SUCCESS;
+	);
+
+	/* A lost device never signals its fences: count the buffer as done, so
+	 * it's cleaned up rather than kept (and a new one made) every frame
+	 */
+	return	result == VK_SUCCESS ||
+		VULKAN_INTERNAL_CheckLost(renderer, "vkWaitForFences", result);
 }
 
 static void VULKAN_CommandBuffer_WaitForFences(
@@ -11062,13 +11264,13 @@ static void VULKAN_CommandBuffer_WaitForFences(
 		fences[i] = commandBuffers[i]->inFlightFence;
 	}
 
-	renderer->vkWaitForFences(
+	VULKAN_INTERNAL_CheckLost(renderer, "vkWaitForFences", renderer->vkWaitForFences(
 		renderer->logicalDevice,
 		handleCount,
 		fences,
 		VK_TRUE,
 		UINT64_MAX
-	);
+	));
 
 	SDL_stack_free(fences);
 }
@@ -11547,6 +11749,24 @@ static FNA3D_Device* VULKAN_CreateDevice(
 		&renderer->defragSemaphore
 	);
 	VULKAN_ERROR_CHECK(vulkanResult, vkCreateSemaphore, NULL)
+
+	/* A fence that's never submitted, for FNA3D_GetDeviceStatus to poll: an
+	 * idle host submits nothing, so nothing else would see a loss. Optional.
+	 */
+	{
+		VkFenceCreateInfo statusFenceInfo;
+		statusFenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+		statusFenceInfo.pNext = NULL;
+		statusFenceInfo.flags = 0;
+		if (renderer->vkCreateFence(
+			renderer->logicalDevice,
+			&statusFenceInfo,
+			NULL,
+			&renderer->statusFence
+		) != VK_SUCCESS) {
+			renderer->statusFence = VK_NULL_HANDLE;
+		}
+	}
 
 	/*
 	 * Create command pool and buffers

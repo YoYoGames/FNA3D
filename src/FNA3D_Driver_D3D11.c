@@ -63,21 +63,24 @@
 #define DXGI_PRESENT_ALLOW_TEARING 0x00000200UL
 #endif /* DXGI_PRESENT_ALLOW_TEARING */
 
+/* A lost device isn't an error to log: it's recorded for FNA3D_GetDeviceStatus
+ * (D3D11_INTERNAL_OnError), and the host decides what to do.
+ */
 #define ERROR_CHECK(msg) \
 	if (FAILED(res)) \
 	{ \
-		D3D11_INTERNAL_LogError(renderer->device, msg, res); \
+		D3D11_INTERNAL_OnError(renderer, msg, res); \
 	}
 #define ERROR_CHECK_RETURN(msg, ret) \
 	if (FAILED(res)) \
 	{ \
-		D3D11_INTERNAL_LogError(renderer->device, msg, res); \
+		D3D11_INTERNAL_OnError(renderer, msg, res); \
 		return ret; \
 	}
 #define ERROR_CHECK_UNLOCK_RETURN(msg, ret) \
 	if (FAILED(res)) \
 	{ \
-		D3D11_INTERNAL_LogError(renderer->device, msg, res); \
+		D3D11_INTERNAL_OnError(renderer, msg, res); \
 		SDL_UnlockMutex(renderer->ctxLock); \
 		return ret; \
 	}
@@ -212,6 +215,11 @@ typedef struct D3D11SwapchainData
 
 typedef struct D3D11Renderer /* Cast FNA3D_Renderer* to this! */
 {
+	/* Device status (FNA3D_GetDeviceStatus) */
+	uint8_t deviceLost;
+	HRESULT lostReason;
+	uint8_t softwareAdapter;
+
 	/* Persistent D3D11 Objects */
 	ID3D11Device *device;
 	ID3D11DeviceContext *context;
@@ -560,6 +568,77 @@ static void D3D11_INTERNAL_LogError(
 	wszMsgBuff[dwChars] = '\0';
 
 	FNA3D_LogError("%s! Error Code: %s (0x%08X)", msg, wszMsgBuff, res);
+}
+
+/* The DXGI results that mean the device is gone. Defined here too for builds
+ * whose headers don't have them (dxvk-native).
+ */
+#ifndef DXGI_ERROR_DEVICE_REMOVED
+#define DXGI_ERROR_DEVICE_REMOVED ((HRESULT) 0x887A0005L)
+#endif
+#ifndef DXGI_ERROR_DEVICE_HUNG
+#define DXGI_ERROR_DEVICE_HUNG ((HRESULT) 0x887A0006L)
+#endif
+#ifndef DXGI_ERROR_DEVICE_RESET
+#define DXGI_ERROR_DEVICE_RESET ((HRESULT) 0x887A0007L)
+#endif
+#ifndef DXGI_ERROR_DRIVER_INTERNAL_ERROR
+#define DXGI_ERROR_DRIVER_INTERNAL_ERROR ((HRESULT) 0x887A0020L)
+#endif
+
+static inline uint8_t D3D11_INTERNAL_IsLostResult(HRESULT res)
+{
+	return (	res == DXGI_ERROR_DEVICE_REMOVED ||
+			res == DXGI_ERROR_DEVICE_HUNG ||
+			res == DXGI_ERROR_DEVICE_RESET ||
+			res == DXGI_ERROR_DRIVER_INTERNAL_ERROR	);
+}
+
+/* Record that the device is lost, once: the reason is GetDeviceRemovedReason's
+ * when the driver has one (a removal reports why: hung, reset, ...), else the
+ * result that showed it. Logged as a warning, not an error: the host polls
+ * FNA3D_GetDeviceStatus and decides what to do.
+ */
+static void D3D11_INTERNAL_MarkLost(
+	D3D11Renderer *renderer,
+	const char *where,
+	HRESULT res
+) {
+	HRESULT reason = res;
+	if (renderer->deviceLost)
+	{
+		return;
+	}
+	if (renderer->device != NULL)
+	{
+		HRESULT removed = ID3D11Device_GetDeviceRemovedReason(renderer->device);
+		if (FAILED(removed))
+		{
+			reason = removed;
+		}
+	}
+	renderer->deviceLost = 1;
+	renderer->lostReason = reason;
+	FNA3D_LogWarn(
+		"D3D11 device lost (%s): 0x%08X, first seen with 0x%08X",
+		where,
+		(uint32_t) reason,
+		(uint32_t) res
+	);
+}
+
+/* ERROR_CHECK's handler: a lost device is recorded, anything else is logged */
+static void D3D11_INTERNAL_OnError(
+	D3D11Renderer *renderer,
+	const char *msg,
+	HRESULT res
+) {
+	if (D3D11_INTERNAL_IsLostResult(res))
+	{
+		D3D11_INTERNAL_MarkLost(renderer, msg, res);
+		return;
+	}
+	D3D11_INTERNAL_LogError(renderer->device, msg, res);
 }
 
 static inline uint32_t D3D11_INTERNAL_CalcSubresource(
@@ -1485,6 +1564,44 @@ static void D3D11_DestroyContext(
 	 */
 }
 
+/* Device Status */
+
+static FNA3D_DeviceStatus D3D11_GetDeviceStatus(
+	FNA3D_Renderer *driverData,
+	uint32_t *reason,
+	uint8_t *softwareAdapter
+) {
+	D3D11Renderer *renderer = (D3D11Renderer*) driverData;
+	if (!renderer->deviceLost && renderer->device != NULL)
+	{
+		/* Ask the driver directly: a removed or reset device says so here
+		 * even if nothing has failed yet (an idle host draws nothing)
+		 */
+		HRESULT removed = ID3D11Device_GetDeviceRemovedReason(renderer->device);
+		if (FAILED(removed))
+		{
+			D3D11_INTERNAL_MarkLost(renderer, "GetDeviceRemovedReason", removed);
+		}
+	}
+	*reason = renderer->deviceLost ? (uint32_t) renderer->lostReason : 0;
+	*softwareAdapter = renderer->softwareAdapter;
+	return renderer->deviceLost ? FNA3D_DEVICESTATUS_LOST : FNA3D_DEVICESTATUS_OK;
+}
+
+static void D3D11_SimulateDeviceLost(
+	FNA3D_Renderer *driverData,
+	uint32_t reason
+) {
+	D3D11Renderer *renderer = (D3D11Renderer*) driverData;
+	if (renderer->deviceLost)
+	{
+		return;
+	}
+	renderer->deviceLost = 1;
+	renderer->lostReason = (reason != 0) ? (HRESULT) reason : DXGI_ERROR_DEVICE_HUNG;
+	FNA3D_LogWarn("D3D11 device lost (simulated): 0x%08X", (uint32_t) renderer->lostReason);
+}
+
 static void D3D11_SwapBuffers(
 	FNA3D_Renderer *driverData,
 	FNA3D_Rect *sourceRectangle,
@@ -1496,6 +1613,7 @@ static void D3D11_SwapBuffers(
 	FNA3D_Rect srcRect, dstRect;
 	D3D11SwapchainData *swapchainData;
 	uint32_t presentFlags;
+	HRESULT res;
 
 	/* Only the faux-backbuffer supports presenting
 	 * specific regions given to Present().
@@ -1633,11 +1751,18 @@ static void D3D11_SwapBuffers(
 	{
 		presentFlags = 0;
 	}
-	IDXGISwapChain_Present(
+	res = IDXGISwapChain_Present(
 		swapchainData->swapchain,
 		renderer->syncInterval,
 		presentFlags
 	);
+	if (D3D11_INTERNAL_IsLostResult(res))
+	{
+		/* Present is often the first call to fail after a loss: an idle
+		 * host draws nothing new, so nothing else would see it
+		 */
+		D3D11_INTERNAL_MarkLost(renderer, "Present", res);
+	}
 
 	/* Bind the faux-backbuffer now, in case DXGI unsets target state */
 	D3D11_SetRenderTargets(
@@ -5580,6 +5705,9 @@ static FNA3D_Device* D3D11_CreateDevice(
 	}
 
 	IDXGIAdapter1_GetDesc1(renderer->adapter, &adapterDesc);
+	/* DXGI_ADAPTER_FLAG_SOFTWARE (2): WARP or the Microsoft Basic Render Driver */
+	renderer->softwareAdapter = (	(adapterDesc.Flags & 2) != 0 ||
+					driverType == D3D_DRIVER_TYPE_WARP	);
 
 	/* Load D3D11CreateDevice */
 	renderer->d3d11_dll = SDL_LoadObject(D3D11_DLL);

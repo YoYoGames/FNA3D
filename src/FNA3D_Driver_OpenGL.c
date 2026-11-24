@@ -5982,6 +5982,20 @@ FNA3D_Device* OPENGL_CreateDevice(
 	renderer->context = SDL_GL_CreateContext(
 		(SDL_Window*) presentationParameters->deviceWindowHandle
 	);
+	if (renderer->context == NULL)
+	{
+		/* Everything below needs a current context: without one,
+		 * glGetString returns NULL (or crashes). Fail cleanly, so
+		 * the host can try again or fall back.
+		 */
+		FNA3D_LogError(
+			"SDL_GL_CreateContext failed: %s",
+			SDL_GetError()
+		);
+		SDL_free(renderer);
+		SDL_free(result);
+		return NULL;
+	}
 
 	/* Check for a possible ES/Core context */
 	SDL_GL_GetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, &flags);

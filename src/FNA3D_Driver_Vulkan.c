@@ -7567,6 +7567,19 @@ static void VULKAN_DestroyDevice(FNA3D_Device *device)
 
 	FNA3D_CommandBuffer_Finish(renderer->commandBuffers);
 
+	/* On a lost device the submit fails, so the current command buffer
+	 * still holds every resource the host disposed of since the loss:
+	 * they'd be destroyed when its fence signals, which never happens.
+	 * Destroy them now, while the device exists, so a host that releases
+	 * its resources before destroying a lost device doesn't leak them.
+	 * DestroyCommandBufferManager expects a current buffer, so begin one.
+	 */
+	if (renderer->deviceLost)
+	{
+		FNA3D_CommandBuffer_DiscardCurrent(renderer->commandBuffers);
+		FNA3D_CommandBuffer_BeginRecording(renderer->commandBuffers);
+	}
+
 	/* Save the pipeline cache to disk */
 
 	pipelineCacheResult = renderer->vkGetPipelineCacheData(

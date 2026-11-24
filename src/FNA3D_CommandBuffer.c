@@ -679,6 +679,24 @@ void FNA3D_CommandBuffer_SubmitCurrent(FNA3D_CommandBufferManager *manager)
 	manager->currentCommandBufferContainer = NULL;
 }
 
+void FNA3D_CommandBuffer_DiscardCurrent(FNA3D_CommandBufferManager *manager)
+{
+	FNA3D_CommandBufferContainer *container;
+
+	SDL_LockMutex(manager->commandLock);
+	container = manager->currentCommandBufferContainer;
+	manager->currentCommandBufferContainer = NULL;
+	if (container != NULL)
+	{
+		/* Its commands will never run: destroy what it holds for
+		 * destruction now, as its fence would have, and return it to
+		 * the inactive list.
+		 */
+		FNA3D_CommandBuffer_CleanContainer(manager, container);
+	}
+	SDL_UnlockMutex(manager->commandLock);
+}
+
 FNA3D_CommandBuffer* FNA3D_CommandBuffer_GetCurrent(FNA3D_CommandBufferManager *manager)
 {
 	return manager->currentCommandBufferContainer->handle;

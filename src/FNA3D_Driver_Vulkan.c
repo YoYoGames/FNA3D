@@ -7567,18 +7567,17 @@ static void VULKAN_DestroyDevice(FNA3D_Device *device)
 
 	FNA3D_CommandBuffer_Finish(renderer->commandBuffers);
 
-	/* On a lost device the submit fails, so the current command buffer
-	 * still holds every resource the host disposed of since the loss:
-	 * they'd be destroyed when its fence signals, which never happens.
-	 * Destroy them now, while the device exists, so a host that releases
-	 * its resources before destroying a lost device doesn't leak them.
-	 * DestroyCommandBufferManager expects a current buffer, so begin one.
+	/* On a lost device the submit fails, so resources disposed of since the
+	 * loss stay queued on the current command buffer and aren't destroyed.
+	 * Destroying them here on a lost device crashed NVIDIA's driver (an
+	 * access violation in DestroyDevice, once in two runs right after a
+	 * TDR), so they're left. FNA3D_DestroyMemoryAllocator below frees the
+	 * device memory they used, and vkDestroyDevice ends the device: only
+	 * their host-side records leak. Their VkImage, VkImageView and VkBuffer
+	 * handles are still alive when the device is destroyed, which the validation layers report
+	 * (VUID-vkDestroyDevice-device-05137). That's expected on this path;
+	 * drivers free them with the device.
 	 */
-	if (renderer->deviceLost)
-	{
-		FNA3D_CommandBuffer_DiscardCurrent(renderer->commandBuffers);
-		FNA3D_CommandBuffer_BeginRecording(renderer->commandBuffers);
-	}
 
 	/* Save the pipeline cache to disk */
 

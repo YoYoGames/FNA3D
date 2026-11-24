@@ -5986,14 +5986,16 @@ FNA3D_Device* OPENGL_CreateDevice(
 	{
 		/* Everything below needs a current context: without one,
 		 * glGetString returns NULL (or crashes). Fail cleanly, so
-		 * the host can try again or fall back.
+		 * the host can try again or fall back. Free first: a host's
+		 * error hook may throw out of FNA3D_LogError (SDL_free
+		 * leaves SDL's error string alone).
 		 */
+		SDL_free(renderer);
+		SDL_free(result);
 		FNA3D_LogError(
 			"SDL_GL_CreateContext failed: %s",
 			SDL_GetError()
 		);
-		SDL_free(renderer);
-		SDL_free(result);
 		return NULL;
 	}
 

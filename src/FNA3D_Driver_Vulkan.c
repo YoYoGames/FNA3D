@@ -7574,8 +7574,7 @@ static void VULKAN_DestroyDevice(FNA3D_Device *device)
 	 * TDR), so they're left. FNA3D_DestroyMemoryAllocator below frees the
 	 * device memory they used, and vkDestroyDevice ends the device: only
 	 * their host-side records leak. Their VkImage, VkImageView and VkBuffer
-	 * handles (and any framebuffers using them) are still alive when the
-	 * device is destroyed, which the validation layers report
+	 * handles are still alive when the device is destroyed, which the validation layers report
 	 * (VUID-vkDestroyDevice-device-05137). That's expected on this path;
 	 * drivers free them with the device.
 	 */

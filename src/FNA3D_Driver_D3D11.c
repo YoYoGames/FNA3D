@@ -1172,6 +1172,15 @@ static void D3D11_DestroyDevice(FNA3D_Device *device)
 	}
 	SDL_free(renderer->swapchainDatas);
 
+	/* D3D11 destroys objects lazily: a released swapchain stays bound to its
+	 * window until the context is flushed, and creating a new swapchain for
+	 * that window (a new device after a lost one) then fails with
+	 * E_ACCESSDENIED. Unbind everything and flush, as DXGI's documentation
+	 * says, so the windows are free before this returns.
+	 */
+	ID3D11DeviceContext_ClearState(renderer->context);
+	ID3D11DeviceContext_Flush(renderer->context);
+
 	/* Release blend states */
 	for (i = 0; i < renderer->blendStateCache.count; i += 1)
 	{

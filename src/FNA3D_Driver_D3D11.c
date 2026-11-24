@@ -1246,9 +1246,13 @@ static void D3D11_DestroyDevice(FNA3D_Device *device)
 	ID3D11DeviceContext_Release(renderer->context);
 	ID3D11Device_Release(renderer->device);
 
-	/* Release the DLLs */
-	SDL_UnloadObject(renderer->d3d11_dll);
-	SDL_UnloadObject(renderer->dxgi_dll);
+	/* The DLLs stay loaded: d3d11.dll and dxgi.dll are system DLLs, and the
+	 * runtime and driver can still be finishing the device's teardown on
+	 * another thread after its last Release. Unloading them then crashed in
+	 * d3d11.dll_unloaded when a host destroyed a lost device whose resources
+	 * it had released first (so this Release was the device's last). Each
+	 * device takes its own reference, so this only leaves the module mapped.
+	 */
 
 	SDL_DestroyMutex(renderer->ctxLock);
 	SDL_free(renderer);

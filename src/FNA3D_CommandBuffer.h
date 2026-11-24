@@ -188,6 +188,13 @@ FNA3D_SHAREDINTERNAL void FNA3D_CommandBuffer_AddDisposeBuffers(
 FNA3D_SHAREDINTERNAL uint8_t FNA3D_CommandBuffer_PerformCleanups(FNA3D_CommandBufferManager *manager);
 
 FNA3D_SHAREDINTERNAL void FNA3D_CommandBuffer_SubmitCurrent(FNA3D_CommandBufferManager *manager);
+
+/* Drops the current command buffer without submitting it, destroying the
+ * resources queued on it for destruction. For a lost device, whose submits
+ * fail and whose fences never signal. Leaves no current buffer: call
+ * BeginRecording if one is needed.
+ */
+FNA3D_SHAREDINTERNAL void FNA3D_CommandBuffer_DiscardCurrent(FNA3D_CommandBufferManager *manager);
 FNA3D_SHAREDINTERNAL FNA3D_CommandBuffer* FNA3D_CommandBuffer_GetCurrent(FNA3D_CommandBufferManager *manager);
 FNA3D_SHAREDINTERNAL FNA3D_CommandBuffer* FNA3D_CommandBuffer_GetDefragBuffer(FNA3D_CommandBufferManager *manager);
 

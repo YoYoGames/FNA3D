@@ -239,6 +239,8 @@ FNA3D_Device* FNA3D_CreateDevice(
 	FNA3D_PresentationParameters *presentationParameters,
 	uint8_t debugMode
 ) {
+	FNA3D_Device *device;
+
 	TRACE_CREATEDEVICE
 	if (selectedDriver < 0)
 	{
@@ -246,10 +248,31 @@ FNA3D_Device* FNA3D_CreateDevice(
 		return NULL;
 	}
 
-	return drivers[selectedDriver]->CreateDevice(
+	device = drivers[selectedDriver]->CreateDevice(
 		presentationParameters,
 		debugMode
 	);
+	if (device != NULL)
+	{
+		uint64_t budget, usage;
+		FNA3D_LogInfo(
+			"Max Texture Size: %d",
+			device->GetMaxTextureSize(device->driverData)
+		);
+		if (device->GetVideoMemoryInfo(device->driverData, &budget, &usage))
+		{
+			FNA3D_LogInfo(
+				"Video Memory: budget %u MB, in use %u MB",
+				(uint32_t) (budget >> 20),
+				(uint32_t) (usage >> 20)
+			);
+		}
+		else
+		{
+			FNA3D_LogInfo("Video Memory: unknown");
+		}
+	}
+	return device;
 }
 
 void FNA3D_DestroyDevice(FNA3D_Device *device)
@@ -325,6 +348,44 @@ void FNA3D_SimulateDeviceLost(FNA3D_Device *device, uint32_t reason)
 		return;
 	}
 	device->SimulateDeviceLost(device->driverData, reason);
+}
+
+/* Limits and video memory */
+
+int32_t FNA3D_GetMaxTextureSize(FNA3D_Device *device)
+{
+	if (device == NULL)
+	{
+		return 0;
+	}
+	return device->GetMaxTextureSize(device->driverData);
+}
+
+uint8_t FNA3D_GetVideoMemoryInfo(
+	FNA3D_Device *device,
+	uint64_t *budget,
+	uint64_t *usage
+) {
+	uint64_t b = 0, u = 0;
+	uint8_t known = 0;
+	if (device != NULL)
+	{
+		known = device->GetVideoMemoryInfo(device->driverData, &b, &u);
+	}
+	if (!known)
+	{
+		b = 0;
+		u = 0;
+	}
+	if (budget != NULL)
+	{
+		*budget = b;
+	}
+	if (usage != NULL)
+	{
+		*usage = u;
+	}
+	return known;
 }
 
 /* Drawing */

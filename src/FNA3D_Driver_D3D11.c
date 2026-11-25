@@ -1615,6 +1615,56 @@ static void D3D11_SimulateDeviceLost(
 	FNA3D_LogWarn("D3D11 device lost (simulated): 0x%08X", (uint32_t) renderer->lostReason);
 }
 
+/* Limits and video memory */
+
+static int32_t D3D11_GetMaxTextureSize(FNA3D_Renderer *driverData)
+{
+	D3D11Renderer *renderer = (D3D11Renderer*) driverData;
+
+	/* D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION, and D3D10's */
+	return (renderer->featureLevel >= D3D_FEATURE_LEVEL_11_0) ? 16384 : 8192;
+}
+
+static uint8_t D3D11_GetVideoMemoryInfo(
+	FNA3D_Renderer *driverData,
+	uint64_t *budget,
+	uint64_t *usage
+) {
+	D3D11Renderer *renderer = (D3D11Renderer*) driverData;
+	IDXGIAdapter3 *adapter3;
+	DXGI_QUERY_VIDEO_MEMORY_INFO info;
+	HRESULT res;
+
+	/* Under WARP the adapter is the hardware one, not the device's */
+	if (renderer->adapter == NULL || renderer->softwareAdapter)
+	{
+		return 0;
+	}
+	res = IDXGIAdapter1_QueryInterface(
+		renderer->adapter,
+		&D3D_IID_IDXGIAdapter3,
+		(void**) &adapter3
+	);
+	if (FAILED(res)) /* before DXGI 1.4 (Windows 10) */
+	{
+		return 0;
+	}
+	res = IDXGIAdapter3_QueryVideoMemoryInfo(
+		adapter3,
+		0,
+		DXGI_MEMORY_SEGMENT_GROUP_LOCAL,
+		&info
+	);
+	IDXGIAdapter3_Release(adapter3);
+	if (FAILED(res))
+	{
+		return 0;
+	}
+	*budget = info.Budget;
+	*usage = info.CurrentUsage;
+	return 1;
+}
+
 static void D3D11_SwapBuffers(
 	FNA3D_Renderer *driverData,
 	FNA3D_Rect *sourceRectangle,

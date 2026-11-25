@@ -598,6 +598,34 @@ FNA3DAPI FNA3D_DeviceStatus FNA3D_GetDeviceStatus(
  */
 FNA3DAPI void FNA3D_SimulateDeviceLost(FNA3D_Device *device, uint32_t reason);
 
+/* Limits and video memory */
+
+/* The largest width or height a 2D texture or render target can have on this
+ * device: from the feature level on D3D11, maxImageDimension2D on Vulkan,
+ * GL_MAX_TEXTURE_SIZE on OpenGL. A host can check before creating one, since a
+ * texture over the limit fails to create (and logs an error) on every driver.
+ * device:	The device to ask
+ * Returns the size in pixels, or 0 if the driver can't say.
+ */
+FNA3DAPI int32_t FNA3D_GetMaxTextureSize(FNA3D_Device *device);
+
+/* How much video memory this process may use, and how much it uses now, as the
+ * OS reports them: QueryVideoMemoryInfo's local segment on D3D11 (DXGI 1.4),
+ * VK_EXT_memory_budget's device-local heaps on Vulkan, GL_NVX_gpu_memory_info
+ * on OpenGL (NVIDIA only). On a GPU that shares system memory these are its
+ * share of it. A host can check before a large allocation rather than let it
+ * fail, which on some drivers loses the device.
+ * device:	The device to ask
+ * budget:	Filled with the budget in bytes, or 0 if unknown
+ * usage:	Filled with the current usage in bytes, or 0 if unknown
+ * Returns 1 if the driver reported both, else 0.
+ */
+FNA3DAPI uint8_t FNA3D_GetVideoMemoryInfo(
+	FNA3D_Device *device,
+	uint64_t *budget,
+	uint64_t *usage
+);
+
 /* Presents the backbuffer to the window.
  *
  * sourceRectangle:		The region of the buffer to present (or NULL).

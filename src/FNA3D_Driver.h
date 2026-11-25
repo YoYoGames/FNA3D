@@ -331,6 +331,15 @@ struct FNA3D_Device
 		uint32_t reason
 	);
 
+	/* Limits and video memory */
+
+	int32_t (*GetMaxTextureSize)(FNA3D_Renderer *driverData);
+	uint8_t (*GetVideoMemoryInfo)(
+		FNA3D_Renderer *driverData,
+		uint64_t *budget,
+		uint64_t *usage
+	);
+
 	/* Drawing */
 
 	void (*Clear)(
@@ -768,6 +777,8 @@ struct FNA3D_Device
 	ASSIGN_DRIVER_FUNC(DestroyContext, name) \
 	ASSIGN_DRIVER_FUNC(GetDeviceStatus, name) \
 	ASSIGN_DRIVER_FUNC(SimulateDeviceLost, name) \
+	ASSIGN_DRIVER_FUNC(GetMaxTextureSize, name) \
+	ASSIGN_DRIVER_FUNC(GetVideoMemoryInfo, name) \
 	ASSIGN_DRIVER_FUNC(Clear, name) \
 	ASSIGN_DRIVER_FUNC(DrawIndexedPrimitives, name) \
 	ASSIGN_DRIVER_FUNC(DrawInstancedPrimitives, name) \

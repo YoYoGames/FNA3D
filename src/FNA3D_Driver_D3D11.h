@@ -43,6 +43,7 @@ static const IID D3D_IID_IDXGIFactory4 = {0x7632e1f5,0xee65,0x4dca,{0x87,0xfd,0x
 static const IID D3D_IID_IDXGIFactory6 = {0xc1b6694f,0xff09,0x44a9,{0xb0,0x3c,0x77,0x90,0x0a,0x0a,0x1d,0x17}};
 static const IID D3D_IID_IDXGIFactory5 = {0x7632e1f5,0xee65,0x4dca,{0x87,0xfd,0x84,0xcd,0x75,0xf8,0x83,0x8d}};
 static const IID D3D_IID_IDXGIAdapter1 = {0x29038f61,0x3839,0x4626,{0x91,0xfd,0x08,0x68,0x79,0x01,0x1a,0x05}};
+static const IID D3D_IID_IDXGIAdapter3 = {0x645967a4,0x1392,0x4310,{0xa7,0x98,0x80,0x53,0xce,0x3e,0x93,0xfd}};
 static const IID D3D_IID_IDXGISwapChain3 = {0x94d99bdb,0xf1f8,0x4ab0,{0xb2,0x36,0x7d,0xa0,0x17,0x0e,0xda,0xb1}};
 static const IID D3D_IID_ID3D11Texture2D = {0x6f15aaf2,0xd208,0x4e89,{0x9a,0xb4,0x48,0x95,0x35,0xd3,0x4f,0x9c}};
 static const IID D3D_IID_ID3DUserDefinedAnnotation = {0xb2daad8b,0x03d4,0x4dbf,{0x95,0xeb,0x32,0xab,0x4b,0x63,0xd0,0xab}};
@@ -895,5 +896,67 @@ struct IDXGIFactory6
 
 #define IDXGIFactory6_EnumAdapterByGpuPreference(This,Adapter,GpuPreference,riid,ppvAdapter)	\
 	( (This)->lpVtbl -> EnumAdapterByGpuPreference(This,Adapter,GpuPreference,riid,ppvAdapter) ) 
+
+/* IDXGIAdapter3, from dxgi1_4.h: only as far as QueryVideoMemoryInfo */
+
+typedef enum DXGI_MEMORY_SEGMENT_GROUP
+{
+	DXGI_MEMORY_SEGMENT_GROUP_LOCAL = 0,
+	DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL = 1
+} DXGI_MEMORY_SEGMENT_GROUP;
+
+typedef struct DXGI_QUERY_VIDEO_MEMORY_INFO
+{
+	UINT64 Budget;
+	UINT64 CurrentUsage;
+	UINT64 AvailableForReservation;
+	UINT64 CurrentReservation;
+} DXGI_QUERY_VIDEO_MEMORY_INFO;
+
+typedef struct IDXGIAdapter3 IDXGIAdapter3;
+typedef struct IDXGIAdapter3Vtbl
+{
+	/*** IUnknown methods ***/
+	HRESULT ( STDMETHODCALLTYPE *QueryInterface )(
+		IDXGIAdapter3 *This,
+		REFIID riid,
+		void **ppvObject);
+	ULONG ( STDMETHODCALLTYPE *AddRef )(
+		IDXGIAdapter3 *This);
+	ULONG ( STDMETHODCALLTYPE *Release )(
+		IDXGIAdapter3 *This);
+
+	/*** IDXGIObject, IDXGIAdapter, IDXGIAdapter1 and IDXGIAdapter2
+	 * methods: SetPrivateData, SetPrivateDataInterface,
+	 * GetPrivateData, GetParent, EnumOutputs, GetDesc,
+	 * CheckInterfaceSupport, GetDesc1, GetDesc2 (not called here)
+	 ***/
+	void *unused[9];
+
+	/*** IDXGIAdapter3 methods ***/
+	HRESULT ( STDMETHODCALLTYPE *RegisterHardwareContentProtectionTeardownStatusEvent )(
+		IDXGIAdapter3 *This,
+		HANDLE hEvent,
+		DWORD *pdwCookie);
+	void ( STDMETHODCALLTYPE *UnregisterHardwareContentProtectionTeardownStatus )(
+		IDXGIAdapter3 *This,
+		DWORD dwCookie);
+	HRESULT ( STDMETHODCALLTYPE *QueryVideoMemoryInfo )(
+		IDXGIAdapter3 *This,
+		UINT NodeIndex,
+		DXGI_MEMORY_SEGMENT_GROUP MemorySegmentGroup,
+		DXGI_QUERY_VIDEO_MEMORY_INFO *pVideoMemoryInfo);
+} IDXGIAdapter3Vtbl;
+
+struct IDXGIAdapter3
+{
+	struct IDXGIAdapter3Vtbl *lpVtbl;
+};
+
+#define IDXGIAdapter3_Release(This)	\
+	( (This)->lpVtbl -> Release(This) )
+
+#define IDXGIAdapter3_QueryVideoMemoryInfo(This,NodeIndex,MemorySegmentGroup,pVideoMemoryInfo)	\
+	( (This)->lpVtbl -> QueryVideoMemoryInfo(This,NodeIndex,MemorySegmentGroup,pVideoMemoryInfo) )
 
 #endif /* FNA3D_DRIVER_D3D11_H */

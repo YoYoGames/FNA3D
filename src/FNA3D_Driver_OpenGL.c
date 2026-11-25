@@ -169,11 +169,14 @@ typedef struct OpenGLRenderer /* Cast from FNA3D_Renderer* */
 	/* Associated FNA3D_Device */
 	FNA3D_Device *parentDevice;
 
-	/* Device status (FNA3D_GetDeviceStatus): only a simulated loss for now.
-	 * Per device, so a device created after one starts out OK
+	/* Device status (FNA3D_GetDeviceStatus): a context reset, seen through
+	 * glGetGraphicsResetStatus when the context has reset notification, or
+	 * a simulated loss. Per device, so a device created after one starts
+	 * out OK
 	 */
-	uint8_t simulatedLost;
+	uint8_t lost;
 	uint32_t lostReason;
+	glfntype_glGetGraphicsResetStatus glGetGraphicsResetStatus;
 
 	/* Context */
 	SDL_GLContext context;
@@ -1326,8 +1329,55 @@ static void OPENGL_DestroyContext(
 
 /* Device Status */
 
-/* OpenGL has no loss detection yet (that needs GL_KHR_robustness): only a
- * simulated loss is reported.
+static const char *ResetStatusName(GLenum status)
+{
+	switch (status)
+	{
+	case GL_GUILTY_CONTEXT_RESET: return "GL_GUILTY_CONTEXT_RESET";
+	case GL_INNOCENT_CONTEXT_RESET: return "GL_INNOCENT_CONTEXT_RESET";
+	case GL_UNKNOWN_CONTEXT_RESET: return "GL_UNKNOWN_CONTEXT_RESET";
+	default: return "unknown reset status";
+	}
+}
+
+/* Whether the context has been reset (lost). Asks the driver only when the
+ * context has reset notification and is current on this thread: the query
+ * needs it, and the answer is per context. Once reset, a context stays
+ * unusable (the host makes a new device), so the answer is kept: the driver
+ * itself goes back to GL_NO_ERROR once the reset has finished.
+ */
+static uint8_t OPENGL_INTERNAL_CheckReset(OpenGLRenderer *renderer)
+{
+	GLenum status;
+
+	if (renderer->lost)
+	{
+		return 1;
+	}
+	if (	renderer->glGetGraphicsResetStatus == NULL ||
+		SDL_GL_GetCurrentContext() != renderer->context	)
+	{
+		return 0;
+	}
+	status = renderer->glGetGraphicsResetStatus();
+	if (status == 0) /* GL_NO_ERROR */
+	{
+		return 0;
+	}
+	renderer->lost = 1;
+	renderer->lostReason = status;
+	FNA3D_LogWarn(
+		"OpenGL context was reset (%s)",
+		ResetStatusName(status)
+	);
+	return 1;
+}
+
+/* A context reset is seen only where the context has reset notification
+ * (GL_KHR_robustness or GL_ARB_robustness, asked for at CreateDevice). macOS
+ * has neither, and SDL2 doesn't ask for it on EGL (Wayland, ES), so there only a
+ * simulated loss is reported. The reason is the reset status:
+ * GL_GUILTY_CONTEXT_RESET, GL_INNOCENT_CONTEXT_RESET or GL_UNKNOWN_CONTEXT_RESET.
  */
 static FNA3D_DeviceStatus OPENGL_GetDeviceStatus(
 	FNA3D_Renderer *driverData,
@@ -1335,9 +1385,10 @@ static FNA3D_DeviceStatus OPENGL_GetDeviceStatus(
 	uint8_t *softwareAdapter
 ) {
 	OpenGLRenderer *renderer = (OpenGLRenderer*) driverData;
-	*reason = renderer->simulatedLost ? renderer->lostReason : 0;
+	uint8_t lost = OPENGL_INTERNAL_CheckReset(renderer);
+	*reason = lost ? renderer->lostReason : 0;
 	*softwareAdapter = 0;
-	return renderer->simulatedLost ? FNA3D_DEVICESTATUS_LOST : FNA3D_DEVICESTATUS_OK;
+	return lost ? FNA3D_DEVICESTATUS_LOST : FNA3D_DEVICESTATUS_OK;
 }
 
 static void OPENGL_SimulateDeviceLost(
@@ -1345,11 +1396,11 @@ static void OPENGL_SimulateDeviceLost(
 	uint32_t reason
 ) {
 	OpenGLRenderer *renderer = (OpenGLRenderer*) driverData;
-	if (renderer->simulatedLost)
+	if (renderer->lost)
 	{
 		return;
 	}
-	renderer->simulatedLost = 1;
+	renderer->lost = 1;
 	renderer->lostReason = reason;
 	FNA3D_LogWarn("OpenGL device lost (simulated)");
 }
@@ -5077,7 +5128,17 @@ static void OPENGL_CreateEffect(
 		&shaderBackend
 	);
 
-	for (i = 0; i < (*effectData)->error_count; i += 1)
+	/* A reset context fails every shader compile. That's the loss, which
+	 * GetDeviceStatus reports, not an error for the host's error hook
+	 */
+	if (	(*effectData)->error_count > 0 &&
+		OPENGL_INTERNAL_CheckReset(renderer)	)
+	{
+		FNA3D_LogWarn(
+			"MOJOSHADER_compileEffect failed: the OpenGL context was reset"
+		);
+	}
+	else for (i = 0; i < (*effectData)->error_count; i += 1)
 	{
 		FNA3D_LogError(
 			"MOJOSHADER_compileEffect Error: %s",
@@ -5493,7 +5554,11 @@ static void GLAPIENTRY DebugCall(
 	const GLchar *message,
 	const void *userParam
 ) {
-	if (type == GL_DEBUG_TYPE_ERROR)
+	/* After a reset every call can raise GL_CONTEXT_LOST. GL can't be
+	 * called from here, so only a reset already seen counts
+	 */
+	const OpenGLRenderer *renderer = (const OpenGLRenderer*) userParam;
+	if (type == GL_DEBUG_TYPE_ERROR && (renderer == NULL || !renderer->lost))
 	{
 		FNA3D_LogError(
 			"%s\n\tSource: %s\n\tType: %s\n\tSeverity: %s",
@@ -5549,6 +5614,49 @@ static FNA3D_Texture* OPENGL_CreateSysTexture(
 	result->external = 1;
 
 	return (FNA3D_Texture*) result;
+}
+
+/* Load glGetGraphicsResetStatus, if the context really has reset
+ * notification: GLX and WGL only ask for it when the driver has the
+ * extension, and a driver can still give a context without it. The strategy
+ * is only queried when an extension says the enum exists, so a debug context
+ * never sees GL_INVALID_ENUM. Desktop GL's GL_KHR_robustness entry point has
+ * no suffix (as in GL 4.5); ES's has KHR.
+ */
+static void LoadResetStatus(OpenGLRenderer *renderer)
+{
+	const char *name = NULL;
+	GLint strategy = 0;
+
+	if (!renderer->useES3 && SDL_GL_ExtensionSupported("GL_ARB_robustness"))
+	{
+		name = "glGetGraphicsResetStatusARB";
+	}
+	else if (SDL_GL_ExtensionSupported("GL_KHR_robustness"))
+	{
+		name = renderer->useES3 ?
+			"glGetGraphicsResetStatusKHR" :
+			"glGetGraphicsResetStatus";
+	}
+	else if (renderer->useES3 && SDL_GL_ExtensionSupported("GL_EXT_robustness"))
+	{
+		name = "glGetGraphicsResetStatusEXT";
+	}
+	if (name == NULL)
+	{
+		return;
+	}
+
+	renderer->glGetIntegerv(GL_RESET_NOTIFICATION_STRATEGY, &strategy);
+	if (strategy != GL_LOSE_CONTEXT_ON_RESET)
+	{
+		return;
+	}
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+	renderer->glGetGraphicsResetStatus = (glfntype_glGetGraphicsResetStatus)
+		SDL_GL_GetProcAddress(name);
+#pragma GCC diagnostic pop
 }
 
 /* Load GL Entry Points */
@@ -5761,7 +5869,7 @@ static inline void LoadEntryPoints(
 			NULL,
 			GL_FALSE
 		);
-		renderer->glDebugMessageCallback(DebugCall, NULL);
+		renderer->glDebugMessageCallback(DebugCall, renderer);
 	}
 	else
 	{
@@ -5953,6 +6061,7 @@ FNA3D_Device* OPENGL_CreateDevice(
 	int32_t numExtensions, numSamplers, numAttributes, numAttachments;
 	OpenGLRenderer *renderer;
 	FNA3D_Device *result;
+	uint8_t resetNotification;
 #ifdef SDL_VIDEO_DRIVER_UIKIT
 	SDL_SysWMinfo wmInfo;
 #endif /* SDL_VIDEO_DRIVER_UIKIT */
@@ -5978,10 +6087,47 @@ FNA3D_Device* OPENGL_CreateDevice(
 		);
 	}
 
+	/* Ask for reset notification, so a reset (a GPU hang, a driver
+	 * restart) is seen through glGetGraphicsResetStatus, and the context is
+	 * lost rather than carrying on with whatever state it had. SDL2 asks
+	 * for it on GLX and WGL when the driver has the robustness extension,
+	 * and ignores it elsewhere. FNA3D_OPENGL_RESET_NOTIFICATION=0 turns it
+	 * off. Left set afterwards: contexts that share with this one must ask
+	 * for the same.
+	 */
+	resetNotification = SDL_GetHintBoolean(
+		"FNA3D_OPENGL_RESET_NOTIFICATION",
+		SDL_TRUE
+	);
+	SDL_GL_SetAttribute(
+		SDL_GL_CONTEXT_RESET_NOTIFICATION,
+		resetNotification ?
+			SDL_GL_CONTEXT_RESET_LOSE_CONTEXT :
+			SDL_GL_CONTEXT_RESET_NO_NOTIFICATION
+	);
+
 	/* Create OpenGL context */
 	renderer->context = SDL_GL_CreateContext(
 		(SDL_Window*) presentationParameters->deviceWindowHandle
 	);
+	if (renderer->context == NULL && resetNotification)
+	{
+		/* A driver that lists the extension but won't make the
+		 * context: carry on without loss detection
+		 */
+		FNA3D_LogWarn(
+			"SDL_GL_CreateContext with reset notification failed (%s), trying without",
+			SDL_GetError()
+		);
+		resetNotification = 0;
+		SDL_GL_SetAttribute(
+			SDL_GL_CONTEXT_RESET_NOTIFICATION,
+			SDL_GL_CONTEXT_RESET_NO_NOTIFICATION
+		);
+		renderer->context = SDL_GL_CreateContext(
+			(SDL_Window*) presentationParameters->deviceWindowHandle
+		);
+	}
 	if (renderer->context == NULL)
 	{
 		/* Everything below needs a current context: without one,
@@ -6104,6 +6250,14 @@ FNA3D_Device* OPENGL_CreateDevice(
 		rendererStr, versionStr, vendorStr
 	);
 	LoadEntryPoints(renderer, driverInfo, debugMode);
+	if (resetNotification)
+	{
+		LoadResetStatus(renderer);
+	}
+	FNA3D_LogInfo(
+		"OpenGL Reset Notification: %s",
+		renderer->glGetGraphicsResetStatus != NULL ? "yes" : "no"
+	);
 
 	/* Initialize shader context */
 	renderer->shaderProfile = SDL_GetHint("FNA3D_MOJOSHADER_PROFILE");

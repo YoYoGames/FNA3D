@@ -5623,7 +5623,7 @@ static FNA3D_Texture* OPENGL_CreateSysTexture(
  * never sees GL_INVALID_ENUM. Desktop GL's GL_KHR_robustness entry point has
  * no suffix (as in GL 4.5); ES's has KHR.
  */
-static void LoadResetStatus(OpenGLRenderer *renderer)
+static const char* LoadResetStatus(OpenGLRenderer *renderer)
 {
 	const char *name = NULL;
 	GLint strategy = 0;
@@ -5644,19 +5644,22 @@ static void LoadResetStatus(OpenGLRenderer *renderer)
 	}
 	if (name == NULL)
 	{
-		return;
+		return "no (no robustness extension)";
 	}
 
 	renderer->glGetIntegerv(GL_RESET_NOTIFICATION_STRATEGY, &strategy);
 	if (strategy != GL_LOSE_CONTEXT_ON_RESET)
 	{
-		return;
+		return "no (the context was made without it)";
 	}
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wpedantic"
 	renderer->glGetGraphicsResetStatus = (glfntype_glGetGraphicsResetStatus)
 		SDL_GL_GetProcAddress(name);
 #pragma GCC diagnostic pop
+	return renderer->glGetGraphicsResetStatus != NULL ?
+		"yes" :
+		"no (no glGetGraphicsResetStatus)";
 }
 
 /* Load GL Entry Points */
@@ -6062,6 +6065,9 @@ FNA3D_Device* OPENGL_CreateDevice(
 	OpenGLRenderer *renderer;
 	FNA3D_Device *result;
 	uint8_t resetNotification;
+	int32_t profileMask;
+	const char *videoDriver;
+	const char *resetNotificationInfo = "no (not asked for)";
 #ifdef SDL_VIDEO_DRIVER_UIKIT
 	SDL_SysWMinfo wmInfo;
 #endif /* SDL_VIDEO_DRIVER_UIKIT */
@@ -6091,20 +6097,40 @@ FNA3D_Device* OPENGL_CreateDevice(
 	 * restart) is seen through glGetGraphicsResetStatus, and the context is
 	 * lost rather than carrying on with whatever state it had. SDL2 asks
 	 * for it on GLX and WGL when the driver has the robustness extension,
-	 * and ignores it elsewhere. FNA3D_OPENGL_RESET_NOTIFICATION=0 turns it
-	 * off. Left set afterwards: contexts that share with this one must ask
-	 * for the same.
+	 * and ignores it elsewhere (EGL, macOS), so it's only asked for there.
+	 * FNA3D_OPENGL_RESET_NOTIFICATION=0 turns it off. Left set afterwards:
+	 * contexts that share with this one must ask for the same.
 	 */
-	resetNotification = SDL_GetHintBoolean(
-		"FNA3D_OPENGL_RESET_NOTIFICATION",
-		SDL_TRUE
+	videoDriver = SDL_GetCurrentVideoDriver();
+	resetNotification = (
+		videoDriver != NULL &&
+		(	SDL_strcmp(videoDriver, "x11") == 0 ||
+			SDL_strcmp(videoDriver, "windows") == 0	) &&
+		SDL_GetHintBoolean("FNA3D_OPENGL_RESET_NOTIFICATION", SDL_TRUE)
 	);
-	SDL_GL_SetAttribute(
-		SDL_GL_CONTEXT_RESET_NOTIFICATION,
-		resetNotification ?
-			SDL_GL_CONTEXT_RESET_LOSE_CONTEXT :
-			SDL_GL_CONTEXT_RESET_NO_NOTIFICATION
-	);
+	SDL_GL_GetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, &profileMask);
+	if (resetNotification)
+	{
+		SDL_GL_SetAttribute(
+			SDL_GL_CONTEXT_RESET_NOTIFICATION,
+			SDL_GL_CONTEXT_RESET_LOSE_CONTEXT
+		);
+
+		/* With no version, profile or flags asked for (FNA3D's
+		 * default), SDL2 makes a legacy context, which can't have
+		 * reset notification. Asking for the compatibility profile
+		 * makes it use glXCreateContextAttribsARB or
+		 * wglCreateContextAttribsARB instead, for the same context:
+		 * below 3.2 the profile is ignored.
+		 */
+		if (profileMask == 0)
+		{
+			SDL_GL_SetAttribute(
+				SDL_GL_CONTEXT_PROFILE_MASK,
+				SDL_GL_CONTEXT_PROFILE_COMPATIBILITY
+			);
+		}
+	}
 
 	/* Create OpenGL context */
 	renderer->context = SDL_GL_CreateContext(
@@ -6124,6 +6150,7 @@ FNA3D_Device* OPENGL_CreateDevice(
 			SDL_GL_CONTEXT_RESET_NOTIFICATION,
 			SDL_GL_CONTEXT_RESET_NO_NOTIFICATION
 		);
+		SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, profileMask);
 		renderer->context = SDL_GL_CreateContext(
 			(SDL_Window*) presentationParameters->deviceWindowHandle
 		);
@@ -6252,11 +6279,11 @@ FNA3D_Device* OPENGL_CreateDevice(
 	LoadEntryPoints(renderer, driverInfo, debugMode);
 	if (resetNotification)
 	{
-		LoadResetStatus(renderer);
+		resetNotificationInfo = LoadResetStatus(renderer);
 	}
 	FNA3D_LogInfo(
 		"OpenGL Reset Notification: %s",
-		renderer->glGetGraphicsResetStatus != NULL ? "yes" : "no"
+		resetNotificationInfo
 	);
 
 	/* Initialize shader context */

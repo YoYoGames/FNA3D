@@ -319,6 +319,16 @@ typedef void (GLAPIENTRY *DEBUGPROC)(
 /* glGetString is a bit different since we load it early */
 typedef const GLubyte* (GLAPIENTRY *glfntype_glGetString)(GLenum a);
 
+/* Robustness (GL 4.5, GL_KHR_robustness, GL_ARB_robustness, GL_EXT_robustness):
+ * loaded by hand, only when the context was made with reset notification
+ */
+typedef GLenum (GLAPIENTRY *glfntype_glGetGraphicsResetStatus)(void);
+#define GL_GUILTY_CONTEXT_RESET				0x8253
+#define GL_INNOCENT_CONTEXT_RESET			0x8254
+#define GL_UNKNOWN_CONTEXT_RESET			0x8255
+#define GL_RESET_NOTIFICATION_STRATEGY			0x8256
+#define GL_LOSE_CONTEXT_ON_RESET			0x8252
+
 #endif /* FNA3D_DRIVER_OPENGL_H */
 
 /* vim: set noexpandtab shiftwidth=8 tabstop=8: */

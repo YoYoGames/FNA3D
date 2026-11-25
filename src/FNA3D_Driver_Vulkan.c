@@ -95,6 +95,8 @@ typedef struct VulkanExtensions
 	uint8_t KHR_portability_subset;
 	/* Vendor-specific extensions */
 	uint8_t GGP_frame_token;
+	/* For FNA3D_GetVideoMemoryInfo. Needs KHR_get_physical_device_properties2 */
+	uint8_t EXT_memory_budget;
 } VulkanExtensions;
 
 static inline uint8_t CheckDeviceExtensions(
@@ -119,6 +121,7 @@ static inline uint8_t CheckDeviceExtensions(
 		else CHECK(EXT_vertex_attribute_divisor)
 		else CHECK(KHR_portability_subset)
 		else CHECK(GGP_frame_token)
+		else CHECK(EXT_memory_budget)
 		#undef CHECK
 	}
 
@@ -134,7 +137,8 @@ static inline uint32_t GetDeviceExtensionCount(VulkanExtensions *supports)
 		supports->KHR_driver_properties +
 		supports->EXT_vertex_attribute_divisor +
 		supports->KHR_portability_subset +
-		supports->GGP_frame_token
+		supports->GGP_frame_token +
+		supports->EXT_memory_budget
 	);
 }
 
@@ -154,6 +158,7 @@ static inline void CreateDeviceExtensionArray(
 	CHECK(EXT_vertex_attribute_divisor)
 	CHECK(KHR_portability_subset)
 	CHECK(GGP_frame_token)
+	CHECK(EXT_memory_budget)
 	#undef CHECK
 }
 
@@ -2773,6 +2778,13 @@ static uint8_t VULKAN_INTERNAL_CreateLogicalDevice(VulkanRenderer *renderer)
 	deviceCreateInfo.pQueueCreateInfos = &queueCreateInfo;
 	deviceCreateInfo.enabledLayerCount = 0;
 	deviceCreateInfo.ppEnabledLayerNames = NULL;
+	/* VK_EXT_memory_budget depends on the instance's
+	 * VK_KHR_get_physical_device_properties2
+	 */
+	if (!renderer->supportsDeviceProperties2)
+	{
+		renderer->supports.EXT_memory_budget = 0;
+	}
 	deviceCreateInfo.enabledExtensionCount = GetDeviceExtensionCount(
 		&renderer->supports
 	);
@@ -7891,6 +7903,65 @@ static void VULKAN_SimulateDeviceLost(
 ) {
 	VulkanRenderer *renderer = (VulkanRenderer*) driverData;
 	VULKAN_INTERNAL_MarkLost(renderer, "simulated", (reason != 0) ? (VkResult) reason : VK_ERROR_DEVICE_LOST);
+}
+
+/* Limits and video memory */
+
+static int32_t VULKAN_GetMaxTextureSize(FNA3D_Renderer *driverData)
+{
+	VulkanRenderer *renderer = (VulkanRenderer*) driverData;
+	const VkPhysicalDeviceLimits *limits = &renderer->physicalDeviceProperties.properties.limits;
+
+	/* A render target is also a framebuffer: the spec doesn't make its
+	 * limits match maxImageDimension2D, though they almost always do
+	 */
+	return (int32_t) SDL_min(
+		limits->maxImageDimension2D,
+		SDL_min(limits->maxFramebufferWidth, limits->maxFramebufferHeight)
+	);
+}
+
+/* VK_EXT_memory_budget, summed over the device-local heaps. On a GPU that
+ * shares system memory (integrated, Apple) that heap is the shared memory
+ */
+static uint8_t VULKAN_GetVideoMemoryInfo(
+	FNA3D_Renderer *driverData,
+	uint64_t *budget,
+	uint64_t *usage
+) {
+	VulkanRenderer *renderer = (VulkanRenderer*) driverData;
+	VkPhysicalDeviceMemoryBudgetPropertiesEXT budgetProperties;
+	VkPhysicalDeviceMemoryProperties2 properties;
+	uint32_t i;
+
+	if (	!renderer->supports.EXT_memory_budget ||
+		!renderer->supportsDeviceProperties2 ||
+		renderer->vkGetPhysicalDeviceMemoryProperties2KHR == NULL	)
+	{
+		return 0;
+	}
+
+	SDL_zero(budgetProperties);
+	budgetProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT;
+	SDL_zero(properties);
+	properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2;
+	properties.pNext = &budgetProperties;
+	renderer->vkGetPhysicalDeviceMemoryProperties2KHR(
+		renderer->physicalDevice,
+		&properties
+	);
+
+	*budget = 0;
+	*usage = 0;
+	for (i = 0; i < properties.memoryProperties.memoryHeapCount; i += 1)
+	{
+		if (properties.memoryProperties.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT)
+		{
+			*budget += budgetProperties.heapBudget[i];
+			*usage += budgetProperties.heapUsage[i];
+		}
+	}
+	return *budget > 0;
 }
 
 static void VULKAN_SwapBuffers(

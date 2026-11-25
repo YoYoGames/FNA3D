@@ -178,6 +178,10 @@ typedef struct OpenGLRenderer /* Cast from FNA3D_Renderer* */
 	uint32_t lostReason;
 	glfntype_glGetGraphicsResetStatus glGetGraphicsResetStatus;
 
+	/* Limits and video memory (FNA3D_GetMaxTextureSize, GetVideoMemoryInfo) */
+	int32_t maxTextureSize;
+	uint8_t supportsNVXMemoryInfo;
+
 	/* Context */
 	SDL_GLContext context;
 	uint8_t useES3;
@@ -1403,6 +1407,43 @@ static void OPENGL_SimulateDeviceLost(
 	renderer->lost = 1;
 	renderer->lostReason = reason;
 	FNA3D_LogWarn("OpenGL device lost (simulated)");
+}
+
+/* Limits and video memory */
+
+static int32_t OPENGL_GetMaxTextureSize(FNA3D_Renderer *driverData)
+{
+	OpenGLRenderer *renderer = (OpenGLRenderer*) driverData;
+	return renderer->maxTextureSize;
+}
+
+/* Only NVIDIA's GL_NVX_gpu_memory_info says, and only how much is free on the
+ * whole GPU: usage here is everyone's, not just this process's. Asked only
+ * while the context is current on this thread and hasn't been reset
+ */
+static uint8_t OPENGL_GetVideoMemoryInfo(
+	FNA3D_Renderer *driverData,
+	uint64_t *budget,
+	uint64_t *usage
+) {
+	OpenGLRenderer *renderer = (OpenGLRenderer*) driverData;
+	GLint total = 0, available = 0;
+
+	if (	!renderer->supportsNVXMemoryInfo ||
+		renderer->lost ||
+		SDL_GL_GetCurrentContext() != renderer->context	)
+	{
+		return 0;
+	}
+	renderer->glGetIntegerv(GL_GPU_MEMORY_INFO_TOTAL_AVAILABLE_MEMORY_NVX, &total);
+	renderer->glGetIntegerv(GL_GPU_MEMORY_INFO_CURRENT_AVAILABLE_VIDMEM_NVX, &available);
+	if (total <= 0)
+	{
+		return 0;
+	}
+	*budget = (uint64_t) total * 1024;
+	*usage = (uint64_t) (total - SDL_min(available, total)) * 1024;
+	return 1;
 }
 
 static void OPENGL_SwapBuffers(
@@ -6308,6 +6349,17 @@ FNA3D_Device* OPENGL_CreateDevice(
 	{
 		resetNotificationInfo = LoadResetStatus(renderer);
 	}
+	renderer->glGetIntegerv(GL_MAX_TEXTURE_SIZE, &renderer->maxTextureSize);
+	{
+		/* A render target's depth/stencil buffer is a renderbuffer */
+		GLint maxRenderbufferSize = 0;
+		renderer->glGetIntegerv(GL_MAX_RENDERBUFFER_SIZE, &maxRenderbufferSize);
+		if (maxRenderbufferSize > 0)
+		{
+			renderer->maxTextureSize = SDL_min(renderer->maxTextureSize, maxRenderbufferSize);
+		}
+	}
+	renderer->supportsNVXMemoryInfo = SDL_GL_ExtensionSupported("GL_NVX_gpu_memory_info");
 	FNA3D_LogInfo(
 		"OpenGL Reset Notification: %s",
 		resetNotificationInfo

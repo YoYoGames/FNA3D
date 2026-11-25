@@ -1260,6 +1260,21 @@ static void SDLGPU_SimulateDeviceLost(
 	FNA3D_LogWarn("SDL_GPU device lost (simulated)");
 }
 
+/* Limits and video memory: SDL_GPU reports neither */
+
+static int32_t SDLGPU_GetMaxTextureSize(FNA3D_Renderer *driverData)
+{
+	return 0;
+}
+
+static uint8_t SDLGPU_GetVideoMemoryInfo(
+	FNA3D_Renderer *driverData,
+	uint64_t *budget,
+	uint64_t *usage
+) {
+	return 0;
+}
+
 /* GDK Support */
 
 #if SDL_PLATFORM_GDK

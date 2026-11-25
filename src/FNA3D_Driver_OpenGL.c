@@ -6350,6 +6350,15 @@ FNA3D_Device* OPENGL_CreateDevice(
 		resetNotificationInfo = LoadResetStatus(renderer);
 	}
 	renderer->glGetIntegerv(GL_MAX_TEXTURE_SIZE, &renderer->maxTextureSize);
+	{
+		/* A render target's depth/stencil buffer is a renderbuffer */
+		GLint maxRenderbufferSize = 0;
+		renderer->glGetIntegerv(GL_MAX_RENDERBUFFER_SIZE, &maxRenderbufferSize);
+		if (maxRenderbufferSize > 0)
+		{
+			renderer->maxTextureSize = SDL_min(renderer->maxTextureSize, maxRenderbufferSize);
+		}
+	}
 	renderer->supportsNVXMemoryInfo = SDL_GL_ExtensionSupported("GL_NVX_gpu_memory_info");
 	FNA3D_LogInfo(
 		"OpenGL Reset Notification: %s",

@@ -7910,7 +7910,15 @@ static void VULKAN_SimulateDeviceLost(
 static int32_t VULKAN_GetMaxTextureSize(FNA3D_Renderer *driverData)
 {
 	VulkanRenderer *renderer = (VulkanRenderer*) driverData;
-	return (int32_t) renderer->physicalDeviceProperties.properties.limits.maxImageDimension2D;
+	const VkPhysicalDeviceLimits *limits = &renderer->physicalDeviceProperties.properties.limits;
+
+	/* A render target is also a framebuffer: the spec doesn't make its
+	 * limits match maxImageDimension2D, though they almost always do
+	 */
+	return (int32_t) SDL_min(
+		limits->maxImageDimension2D,
+		SDL_min(limits->maxFramebufferWidth, limits->maxFramebufferHeight)
+	);
 }
 
 /* VK_EXT_memory_budget, summed over the device-local heaps. On a GPU that

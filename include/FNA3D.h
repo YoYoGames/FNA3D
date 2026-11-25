@@ -601,8 +601,9 @@ FNA3DAPI void FNA3D_SimulateDeviceLost(FNA3D_Device *device, uint32_t reason);
 /* Limits and video memory */
 
 /* The largest width or height a 2D texture or render target can have on this
- * device: from the feature level on D3D11, maxImageDimension2D on Vulkan,
- * GL_MAX_TEXTURE_SIZE on OpenGL. A host can check before creating one, since a
+ * device: from the feature level on D3D11, the smallest of maxImageDimension2D
+ * and maxFramebufferWidth/Height on Vulkan, of GL_MAX_TEXTURE_SIZE and
+ * GL_MAX_RENDERBUFFER_SIZE on OpenGL. A host can check before creating one, since a
  * texture over the limit fails to create (and logs an error) on every driver.
  * device:	The device to ask
  * Returns the size in pixels, or 0 if the driver can't say.
@@ -613,7 +614,10 @@ FNA3DAPI int32_t FNA3D_GetMaxTextureSize(FNA3D_Device *device);
  * OS reports them: QueryVideoMemoryInfo's local segment on D3D11 (DXGI 1.4),
  * VK_EXT_memory_budget's device-local heaps on Vulkan, GL_NVX_gpu_memory_info
  * on OpenGL (NVIDIA only). On a GPU that shares system memory these are its
- * share of it. A host can check before a large allocation rather than let it
+ * share of it. On OpenGL the budget is the GPU's total memory and the usage
+ * is every process's, not only this one's; and it can only be asked on the
+ * thread where the GL context is current: from any other thread (or after a
+ * reset) it returns 0, unknown. A host can check before a large allocation rather than let it
  * fail, which on some drivers loses the device.
  * device:	The device to ask
  * budget:	Filled with the budget in bytes, or 0 if unknown

@@ -331,6 +331,7 @@ typedef GLenum (GLAPIENTRY *glfntype_glGetGraphicsResetStatus)(void);
 
 /* Limits and video memory */
 #define GL_MAX_TEXTURE_SIZE				0x0D33
+#define GL_MAX_RENDERBUFFER_SIZE			0x84E8
 #define GL_GPU_MEMORY_INFO_TOTAL_AVAILABLE_MEMORY_NVX	0x9048
 #define GL_GPU_MEMORY_INFO_CURRENT_AVAILABLE_VIDMEM_NVX	0x9049
 

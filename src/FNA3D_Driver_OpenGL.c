@@ -1415,6 +1415,13 @@ static void OPENGL_SwapBuffers(
 	int32_t dstX, dstY, dstW, dstH;
 	OpenGLRenderer *renderer = (OpenGLRenderer*) driverData;
 
+	/* Once a frame, so a reset is seen by the next frame even if the host
+	 * doesn't poll GetDeviceStatus: errors the reset causes after this
+	 * (GL_CONTEXT_LOST in a debug context, failed shader compiles) are then
+	 * warnings rather than errors
+	 */
+	OPENGL_INTERNAL_CheckReset(renderer);
+
 	/* Only the faux-backbuffer supports presenting
 	 * specific regions given to Present().
 	 * -flibit
@@ -5555,7 +5562,8 @@ static void GLAPIENTRY DebugCall(
 	const void *userParam
 ) {
 	/* After a reset every call can raise GL_CONTEXT_LOST. GL can't be
-	 * called from here, so only a reset already seen counts
+	 * called from here, so only a reset already seen counts: by
+	 * GetDeviceStatus, a failed shader compile, or the last SwapBuffers
 	 */
 	const OpenGLRenderer *renderer = (const OpenGLRenderer*) userParam;
 	if (type == GL_DEBUG_TYPE_ERROR && (renderer == NULL || !renderer->lost))
@@ -6052,6 +6060,11 @@ static uint8_t OPENGL_PrepareWindowAttributes(uint32_t *flags)
 	return 1;
 }
 
+/* Whether the last CreateDevice set the compatibility profile itself (for
+ * reset notification), so the next one can tell it from the host's own
+ */
+static uint8_t setCompatibilityProfile = 0;
+
 FNA3D_Device* OPENGL_CreateDevice(
 	FNA3D_PresentationParameters *presentationParameters,
 	uint8_t debugMode
@@ -6099,16 +6112,28 @@ FNA3D_Device* OPENGL_CreateDevice(
 	 * for it on GLX and WGL when the driver has the robustness extension,
 	 * and ignores it elsewhere (EGL, macOS), so it's only asked for there.
 	 * FNA3D_OPENGL_RESET_NOTIFICATION=0 turns it off. Left set afterwards:
-	 * contexts that share with this one must ask for the same.
+	 * contexts that share with this one must ask for the same. So the
+	 * next device sees what this one set, and both attributes are set
+	 * every time, from the host's own profile mask.
 	 */
 	videoDriver = SDL_GetCurrentVideoDriver();
 	resetNotification = (
 		videoDriver != NULL &&
 		(	SDL_strcmp(videoDriver, "x11") == 0 ||
 			SDL_strcmp(videoDriver, "windows") == 0	) &&
-		SDL_GetHintBoolean("FNA3D_OPENGL_RESET_NOTIFICATION", SDL_TRUE)
+		SDL_GetHintBoolean("FNA3D_OPENGL_RESET_NOTIFICATION", 1)
 	);
 	SDL_GL_GetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, &profileMask);
+	if (setCompatibilityProfile && profileMask == SDL_GL_CONTEXT_PROFILE_COMPATIBILITY)
+	{
+		profileMask = 0; /* ours, from the last device: not the host's */
+	}
+	setCompatibilityProfile = 0;
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, profileMask);
+	SDL_GL_SetAttribute(
+		SDL_GL_CONTEXT_RESET_NOTIFICATION,
+		SDL_GL_CONTEXT_RESET_NO_NOTIFICATION
+	);
 	if (resetNotification)
 	{
 		SDL_GL_SetAttribute(
@@ -6129,6 +6154,7 @@ FNA3D_Device* OPENGL_CreateDevice(
 				SDL_GL_CONTEXT_PROFILE_MASK,
 				SDL_GL_CONTEXT_PROFILE_COMPATIBILITY
 			);
+			setCompatibilityProfile = 1;
 		}
 	}
 
@@ -6151,6 +6177,7 @@ FNA3D_Device* OPENGL_CreateDevice(
 			SDL_GL_CONTEXT_RESET_NO_NOTIFICATION
 		);
 		SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, profileMask);
+		setCompatibilityProfile = 0;
 		renderer->context = SDL_GL_CreateContext(
 			(SDL_Window*) presentationParameters->deviceWindowHandle
 		);
